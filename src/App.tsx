@@ -1,8 +1,12 @@
+import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { useEffect, useMemo, useState } from 'react';
 import { calculateLateMinutes, calculateRequiredCheckout, calculateWorkedMinutes, isDailyTargetMet, projectCheckout } from './lib/calculator';
 import { getDashboardData, useAppStore } from './lib/store';
 import { formatMinutes, formatMonthVi, formatRange, formatSigned, formatViDate, hmOrDash, hmToMinutes, isoDate, minutesToHm, mondayOf, nowHm, parseIso, todayIso, weekDates } from './lib/time';
+
+const GITHUB_RELEASE_REPO = 'YOUR_USERNAME/YOUR_REPO';
 
 function formatDurationHms(totalSeconds: number): string {
   const safe = Math.max(0, Math.round(totalSeconds));
@@ -10,6 +14,25 @@ function formatDurationHms(totalSeconds: number): string {
   const minutes = Math.floor((safe % 3600) / 60);
   const seconds = safe % 60;
   return [hours, minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':');
+}
+
+function parseVersion(value: string): number[] {
+  return (value || '0.0.0').replace(/^v/i, '').split(/[.-]/).map((part) => Number.parseInt(part, 10) || 0);
+}
+
+function compareVersions(local: string, remote: string): number {
+  const left = parseVersion(local);
+  const right = parseVersion(remote);
+  const maxLength = Math.max(left.length, right.length);
+
+  for (let index = 0; index < maxLength; index += 1) {
+    const a = left[index] ?? 0;
+    const b = right[index] ?? 0;
+    if (a > b) return 1;
+    if (a < b) return -1;
+  }
+
+  return 0;
 }
 
 // function StatusBadge({ value }: { value: number }) {
@@ -66,10 +89,19 @@ export default function App() {
   const [view, setView] = useState<'dashboard' | 'calendar' | 'settings'>('dashboard');
   const [calendarView, setCalendarView] = useState<'week' | 'month'>('week');
   const [editingDate, setEditingDate] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState('0.1.0');
+  const [updateStatus, setUpdateStatus] = useState<{ state: 'idle' | 'checking' | 'up-to-date' | 'new-version' | 'error'; message: string; latestVersion?: string; downloadUrl?: string }>({
+    state: 'idle',
+    message: 'Chưa kiểm tra phiên bản.',
+  });
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void getVersion().then((version) => setAppVersion(version)).catch(() => setAppVersion('0.1.0'));
+  }, []);
 
   useEffect(() => {
     if (!logs.some((entry) => entry.date === today && entry.checkIn && !entry.checkOut)) {
@@ -235,6 +267,48 @@ export default function App() {
       [field]: value,
     });
     await load();
+  };
+
+  const handleCheckVersion = async () => {
+    setUpdateStatus({ state: 'checking', message: 'Đang kiểm tra phiên bản mới...' });
+
+    try {
+      const response = await fetch(`https://api.github.com/repos/${GITHUB_RELEASE_REPO}/releases/latest`, {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'KTimeTracker',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Không thể lấy thông tin release từ GitHub.');
+      }
+
+      const data = await response.json() as { tag_name?: string; html_url?: string; assets?: Array<{ browser_download_url?: string }> };
+      const latestVersion = data.tag_name ? String(data.tag_name) : '0.0.0';
+      const downloadUrl = data.assets?.[0]?.browser_download_url ?? data.html_url ?? '';
+      const diff = compareVersions(appVersion, latestVersion);
+
+      if (diff >= 0) {
+        setUpdateStatus({
+          state: 'up-to-date',
+          message: `Bạn đang dùng phiên bản mới nhất (${appVersion}).`,
+          latestVersion,
+          downloadUrl,
+        });
+        return;
+      }
+
+      setUpdateStatus({
+        state: 'new-version',
+        message: `Có bản mới ${latestVersion}. Bạn đang dùng ${appVersion}.`,
+        latestVersion,
+        downloadUrl,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Không thể kiểm tra phiên bản mới.';
+      setUpdateStatus({ state: 'error', message });
+    }
   };
 
   const handleSubmit = async () => {
@@ -636,6 +710,47 @@ export default function App() {
                 </div>
                 <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3 text-slate-300">
                   Gợi ý: trên Ubuntu GNOME/Wayland, tray icon hoạt động tốt nhất khi AppIndicator được bật và menu tray có sẵn.
+                </div>
+              </div>
+            </div>
+
+            <div className="card p-5">
+              <h2 className="mb-4 text-lg font-semibold text-white">Cập nhật</h2>
+              <div className="space-y-3 text-sm text-slate-200">
+                <div className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+                  <span>Phiên bản hiện tại</span>
+                  <span className="font-semibold text-white">{appVersion}</span>
+                </div>
+
+                <button
+                  className="button-primary w-full"
+                  onClick={() => void handleCheckVersion()}
+                  disabled={updateStatus.state === 'checking'}
+                >
+                  {updateStatus.state === 'checking' ? 'Đang kiểm tra...' : 'Check version'}
+                </button>
+
+                {updateStatus.downloadUrl && (
+                  <button
+                    className="button-secondary w-full"
+                    onClick={() => {
+                      if (updateStatus.downloadUrl) {
+                        void openUrl(updateStatus.downloadUrl);
+                      }
+                    }}
+                  >
+                    Mở download release
+                  </button>
+                )}
+
+                <div className={`rounded-xl border p-3 text-sm ${
+                  updateStatus.state === 'new-version'
+                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100'
+                    : updateStatus.state === 'error'
+                      ? 'border-rose-500/40 bg-rose-500/10 text-rose-100'
+                      : 'border-slate-700 bg-slate-900/60 text-slate-200'
+                }`}>
+                  {updateStatus.message}
                 </div>
               </div>
             </div>

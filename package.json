@@ -7,6 +7,8 @@
     "migrate:sync": "node scripts/sync-migrations.mjs",
     "dev": "node scripts/sync-migrations.mjs && vite",
     "build": "node scripts/sync-migrations.mjs && tsc -b && vite build",
+    "build:linux": "npm run build && tauri build",
+    "build:windows": "npm run build && tauri build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
