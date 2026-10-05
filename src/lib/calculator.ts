@@ -7,14 +7,14 @@
  */
 import { addDays, hmToMinutes, minutesToHm, mondayOf, weekDates, weekday, workingDates } from './time';
 import type {
-    CarryOver,
-    CheckoutTarget,
-    DayLayout,
-    DayReport,
-    LeaveRecord,
-    PeriodReport,
-    Settings,
-    WorkLog,
+  CarryOver,
+  CheckoutTarget,
+  DayLayout,
+  DayReport,
+  LeaveRecord,
+  PeriodReport,
+  Settings,
+  WorkLog,
 } from './types';
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -25,6 +25,8 @@ export const DEFAULT_SETTINGS: Settings = {
   latestNormalCheckIn: 540, // 09:00
   dailyRequiredMinutes: 480,
   weeklyRequiredMinutes: 2400,
+  showTrayIcon: true,
+  showTrayTitle: true,
 };
 
 /**

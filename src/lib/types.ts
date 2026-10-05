@@ -17,6 +17,10 @@ export type Settings = DayLayout & {
   dailyRequiredMinutes: number;
   /** Phút phải làm trong tuần (2400 = 40h). */
   weeklyRequiredMinutes: number;
+  /** Hiện icon tray trên Linux/desktop. */
+  showTrayIcon: boolean;
+  /** Hiện thời gian làm trên header/title của tray. */
+  showTrayTitle: boolean;
 };
 
 export interface WorkLog {

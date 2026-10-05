@@ -10,6 +10,8 @@ const DEFAULT_SETTINGS: Settings = {
   latestNormalCheckIn: 540,
   dailyRequiredMinutes: 480,
   weeklyRequiredMinutes: 2400,
+  showTrayIcon: true,
+  showTrayTitle: true,
 };
 
 let dbPromise: Promise<Database> | null = null;
@@ -72,6 +74,8 @@ export async function getSettings(): Promise<Settings> {
     latestNormalCheckIn: Number(result.latestNormalCheckIn ?? DEFAULT_SETTINGS.latestNormalCheckIn),
     dailyRequiredMinutes: Number(result.dailyRequiredMinutes ?? DEFAULT_SETTINGS.dailyRequiredMinutes),
     weeklyRequiredMinutes: Number(result.weeklyRequiredMinutes ?? DEFAULT_SETTINGS.weeklyRequiredMinutes),
+    showTrayIcon: result.showTrayIcon === undefined ? DEFAULT_SETTINGS.showTrayIcon : result.showTrayIcon === 'true',
+    showTrayTitle: result.showTrayTitle === undefined ? DEFAULT_SETTINGS.showTrayTitle : result.showTrayTitle === 'true',
   };
 }
 
