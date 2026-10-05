@@ -1,0 +1,6 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "windows": ["main"],
+  "permissions": ["sql:default", "sql:allow-load", "sql:allow-execute", "sql:allow-select", "sql:allow-close"]
+}
