@@ -1,3 +1,5 @@
+declare const __APP_VERSION__: string;
+
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -118,7 +120,7 @@ export default function App() {
   const [view, setView] = useState<'dashboard' | 'calendar' | 'settings'>('dashboard');
   const [calendarView, setCalendarView] = useState<'week' | 'month'>('week');
   const [editingDate, setEditingDate] = useState<string | null>(null);
-  const [appVersion, setAppVersion] = useState('0.1.0');
+  const [appVersion, setAppVersion] = useState(__APP_VERSION__);
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   const [updateStatus, setUpdateStatus] = useState<{ state: 'idle' | 'checking' | 'up-to-date' | 'new-version' | 'error'; message: string; latestVersion?: string; downloadUrl?: string }>({
     state: 'idle',
@@ -130,7 +132,7 @@ export default function App() {
   }, [load]);
 
   useEffect(() => {
-    void getVersion().then((version) => setAppVersion(version)).catch(() => setAppVersion('0.1.0'));
+    void getVersion().then((version) => setAppVersion(version)).catch(() => setAppVersion(__APP_VERSION__));
   }, []);
 
   useEffect(() => {
