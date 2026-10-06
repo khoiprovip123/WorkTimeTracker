@@ -1,6 +1,8 @@
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { relaunch } from '@tauri-apps/plugin-process';
+import { check, type Update } from '@tauri-apps/plugin-updater';
 import { useEffect, useMemo, useState } from 'react';
 import { calculateLateMinutes, calculateRequiredCheckout, calculateWorkedMinutes, isDailyTargetMet, projectCheckout } from './lib/calculator';
 import { getDashboardData, useAppStore } from './lib/store';
@@ -33,6 +35,33 @@ function compareVersions(local: string, remote: string): number {
   }
 
   return 0;
+}
+
+function detectRuntimePlatform(): 'windows' | 'linux' | 'mac' | 'other' {
+  if (typeof navigator === 'undefined') return 'other';
+  const userAgent = navigator.userAgent.toLowerCase();
+
+  if (userAgent.includes('win')) return 'windows';
+  if (userAgent.includes('linux')) return 'linux';
+  if (userAgent.includes('mac')) return 'mac';
+  return 'other';
+}
+
+function pickBestReleaseAsset(assets: Array<{ name?: string; browser_download_url?: string }> = [], platform: 'windows' | 'linux' | 'mac' | 'other') {
+  const preferredPatterns: Record<'windows' | 'linux' | 'mac' | 'other', string[]> = {
+    windows: ['.msi', '.exe'],
+    linux: ['.deb', '.appimage', '.rpm'],
+    mac: ['.dmg', '.zip'],
+    other: ['.deb', '.appimage', '.msi', '.exe', '.dmg', '.zip'],
+  };
+
+  const patterns = preferredPatterns[platform];
+  const asset = assets.find((item) => {
+    const name = (item.name ?? '').toLowerCase();
+    return patterns.some((pattern) => name.includes(pattern));
+  });
+
+  return asset?.browser_download_url ?? assets[0]?.browser_download_url ?? '';
 }
 
 // function StatusBadge({ value }: { value: number }) {
@@ -78,7 +107,7 @@ function getCalendarDays(view: 'week' | 'month', anchorDate: string, logs: { dat
 
 export default function App() {
   const today = todayIso();
-  const { logs, leaves, carryOvers, settings, load, saveLog, saveSettings, deleteLog } = useAppStore();
+  const { logs, leaves, carryOvers, settings, isLoading, load, saveLog, saveSettings, deleteLog } = useAppStore();
   const [form, setForm] = useState(() => ({
     date: today,
     checkIn: nowHm(),
@@ -90,6 +119,7 @@ export default function App() {
   const [calendarView, setCalendarView] = useState<'week' | 'month'>('week');
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState('0.1.0');
+  const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   const [updateStatus, setUpdateStatus] = useState<{ state: 'idle' | 'checking' | 'up-to-date' | 'new-version' | 'error'; message: string; latestVersion?: string; downloadUrl?: string }>({
     state: 'idle',
     message: 'Chưa kiểm tra phiên bản.',
@@ -115,6 +145,22 @@ export default function App() {
   const dashboard = useMemo(() => getDashboardData(today, logs, leaves, carryOvers, settings), [today, logs, leaves, carryOvers, settings]);
   const currentLog = logs.find((entry) => entry.date === today);
   const activeSession = currentLog && currentLog.checkIn && !currentLog.checkOut ? currentLog : null;
+
+  useEffect(() => {
+    if (!settings.autoStartWorkSession || isLoading || currentLog || activeSession) return;
+
+    const startedAt = nowHm() || '08:00';
+    void saveLog({
+      date: today,
+      checkIn: startedAt,
+      checkOut: null,
+      workedMinutes: 0,
+      requiredMinutes: null,
+    });
+    setForm((prev) => ({ ...prev, date: today, checkIn: startedAt, checkOut: '' }));
+    setStatusMessage('⚙️ Tự động bắt đầu ca làm khi mở ứng dụng.');
+  }, [activeSession, currentLog, isLoading, saveLog, settings.autoStartWorkSession, today]);
+
   const elapsedSeconds = useMemo(() => {
     if (!activeSession?.checkIn) return 0;
     const startedAt = Date.parse(`${today}T${activeSession.checkIn}:00`);
@@ -269,8 +315,51 @@ export default function App() {
     await load();
   };
 
+  const handleStartupToggle = async (field: 'autoStartOnBoot' | 'autoStartWorkSession', value: boolean) => {
+    await saveSettings({
+      ...settings,
+      [field]: value,
+    });
+    await load();
+  };
+
   const handleCheckVersion = async () => {
     setUpdateStatus({ state: 'checking', message: 'Đang kiểm tra phiên bản mới...' });
+    setPendingUpdate(null);
+
+    if (import.meta.env.DEV) {
+      setUpdateStatus({
+        state: 'up-to-date',
+        message: 'Bạn đang chạy bản dev local. Cập nhật thực tế chỉ áp dụng cho release đã ký.',
+        latestVersion: appVersion,
+      });
+      return;
+    }
+
+    try {
+      if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+        const tauriUpdate = await check();
+
+        if (tauriUpdate) {
+          setPendingUpdate(tauriUpdate);
+          setUpdateStatus({
+            state: 'new-version',
+            message: `Có bản mới ${tauriUpdate.version}. Bạn đang dùng ${appVersion}.`,
+            latestVersion: tauriUpdate.version,
+          });
+          return;
+        }
+
+        setUpdateStatus({
+          state: 'up-to-date',
+          message: `Bạn đang dùng phiên bản mới nhất (${appVersion}).`,
+          latestVersion: appVersion,
+        });
+        return;
+      }
+    } catch (tauriError) {
+      console.warn('Tauri updater not available, falling back to GitHub releases API:', tauriError);
+    }
 
     try {
       const response = await fetch(`https://api.github.com/repos/${GITHUB_RELEASE_REPO}/releases/latest`, {
@@ -284,9 +373,10 @@ export default function App() {
         throw new Error('Không thể lấy thông tin release từ GitHub.');
       }
 
-      const data = await response.json() as { tag_name?: string; html_url?: string; assets?: Array<{ browser_download_url?: string }> };
+      const data = await response.json() as { tag_name?: string; html_url?: string; assets?: Array<{ name?: string; browser_download_url?: string }> };
       const latestVersion = data.tag_name ? String(data.tag_name) : '0.0.0';
-      const downloadUrl = data.assets?.[0]?.browser_download_url ?? data.html_url ?? '';
+      const platform = detectRuntimePlatform();
+      const downloadUrl = pickBestReleaseAsset(data.assets ?? [], platform) || data.html_url || '';
       const diff = compareVersions(appVersion, latestVersion);
 
       if (diff >= 0) {
@@ -309,6 +399,44 @@ export default function App() {
       const message = error instanceof Error ? error.message : 'Không thể kiểm tra phiên bản mới.';
       setUpdateStatus({ state: 'error', message });
     }
+  };
+
+  const handleInstallUpdate = async () => {
+    if (import.meta.env.DEV) {
+      setUpdateStatus({
+        state: 'error',
+        message: 'Bản dev local không auto install update. Hãy build release thật để kiểm tra cập nhật.',
+      });
+      return;
+    }
+
+    if (pendingUpdate) {
+      setUpdateStatus({ state: 'checking', message: 'Đang tải và cài đặt bản mới...' });
+
+      try {
+        await pendingUpdate.downloadAndInstall();
+        await relaunch();
+        return;
+      } catch (error) {
+        console.warn('Tauri updater install failed, using browser fallback:', error);
+      }
+    }
+
+    if (!updateStatus.downloadUrl) {
+      setUpdateStatus({ state: 'error', message: 'Không có link download hợp lệ cho bản cập nhật.' });
+      return;
+    }
+
+    try {
+      if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+        await openUrl(updateStatus.downloadUrl);
+        return;
+      }
+    } catch (error) {
+      console.warn('Open URL via Tauri failed, falling back to browser:', error);
+    }
+
+    window.open(updateStatus.downloadUrl, '_blank', 'noopener,noreferrer');
   };
 
   const handleSubmit = async () => {
@@ -694,6 +822,24 @@ export default function App() {
                     onChange={(e) => void handleTrayDisplayToggle('showTrayTitle', e.target.checked)}
                   />
                 </label>
+
+                <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-200">
+                  <span>Tự khởi động cùng máy</span>
+                  <input
+                    type="checkbox"
+                    checked={settings.autoStartOnBoot}
+                    onChange={(e) => void handleStartupToggle('autoStartOnBoot', e.target.checked)}
+                  />
+                </label>
+
+                <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-200">
+                  <span>Tự bắt đầu ca làm khi mở app</span>
+                  <input
+                    type="checkbox"
+                    checked={settings.autoStartWorkSession}
+                    onChange={(e) => void handleStartupToggle('autoStartWorkSession', e.target.checked)}
+                  />
+                </label>
               </div>
             </div>
 
@@ -727,19 +873,16 @@ export default function App() {
                   onClick={() => void handleCheckVersion()}
                   disabled={updateStatus.state === 'checking'}
                 >
-                  {updateStatus.state === 'checking' ? 'Đang kiểm tra...' : 'Check version'}
+                  {updateStatus.state === 'checking' ? 'Đang kiểm tra...' : 'Check update'}
                 </button>
 
-                {updateStatus.downloadUrl && (
+                {(updateStatus.state === 'new-version' || updateStatus.downloadUrl) && (
                   <button
                     className="button-secondary w-full"
-                    onClick={() => {
-                      if (updateStatus.downloadUrl) {
-                        void openUrl(updateStatus.downloadUrl);
-                      }
-                    }}
+                    onClick={() => void handleInstallUpdate()}
+                    disabled={updateStatus.state === 'checking'}
                   >
-                    Mở download release
+                    {pendingUpdate ? 'Install update' : 'Mở download release'}
                   </button>
                 )}
 

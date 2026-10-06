@@ -21,6 +21,8 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/release/
 src-tauri/debug/
+src-tauri/tauri.key
+src-tauri/tauri.key.pub
 
 # Environment and local config
 .env
