@@ -50,7 +50,7 @@ jobs:
         shell: bash
 
       - name: Install Node dependencies
-        run: npm install
+        run: npm ci
 
       - name: Validate updater signing env
         shell: bash
