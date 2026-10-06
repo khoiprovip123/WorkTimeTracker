@@ -27,6 +27,8 @@ export const DEFAULT_SETTINGS: Settings = {
   weeklyRequiredMinutes: 2400,
   showTrayIcon: true,
   showTrayTitle: true,
+  autoStartOnBoot: false,
+  autoStartWorkSession: false,
 };
 
 /**

@@ -12,6 +12,8 @@ const DEFAULT_SETTINGS: Settings = {
   weeklyRequiredMinutes: 2400,
   showTrayIcon: true,
   showTrayTitle: true,
+  autoStartOnBoot: false,
+  autoStartWorkSession: false,
 };
 
 let dbPromise: Promise<Database> | null = null;
@@ -76,6 +78,8 @@ export async function getSettings(): Promise<Settings> {
     weeklyRequiredMinutes: Number(result.weeklyRequiredMinutes ?? DEFAULT_SETTINGS.weeklyRequiredMinutes),
     showTrayIcon: result.showTrayIcon === undefined ? DEFAULT_SETTINGS.showTrayIcon : result.showTrayIcon === 'true',
     showTrayTitle: result.showTrayTitle === undefined ? DEFAULT_SETTINGS.showTrayTitle : result.showTrayTitle === 'true',
+    autoStartOnBoot: result.autoStartOnBoot === undefined ? DEFAULT_SETTINGS.autoStartOnBoot : result.autoStartOnBoot === 'true',
+    autoStartWorkSession: result.autoStartWorkSession === undefined ? DEFAULT_SETTINGS.autoStartWorkSession : result.autoStartWorkSession === 'true',
   };
 }
 

@@ -21,6 +21,10 @@ export type Settings = DayLayout & {
   showTrayIcon: boolean;
   /** Hiện thời gian làm trên header/title của tray. */
   showTrayTitle: boolean;
+  /** Tự khởi động cùng hệ thống. */
+  autoStartOnBoot: boolean;
+  /** Tự bắt đầu ca làm khi ứng dụng được mở. */
+  autoStartWorkSession: boolean;
 };
 
 export interface WorkLog {

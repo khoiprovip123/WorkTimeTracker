@@ -2,7 +2,6 @@
 
 use tauri::{
   image::Image,
-  menu::MenuBuilder,
   tray::TrayIconBuilder,
   Manager,
 };
@@ -36,10 +35,7 @@ fn update_tray_status(app: tauri::AppHandle, title: String, tooltip: String) -> 
 fn main() {
   tauri::Builder::default()
     .setup(|app| {
-      let menu = MenuBuilder::new(app).build()?;
-
       let tray = TrayIconBuilder::with_id("main")
-        .menu(&menu)
         .icon(Image::from_bytes(include_bytes!("../icons/icon.png")).unwrap())
         .title("Idle")
         .tooltip("Work Time Tracker")
@@ -55,16 +51,9 @@ fn main() {
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![set_tray_visibility, update_tray_status])
-    .plugin(
-      tauri_plugin_sql::Builder::default()
-        .add_migrations("sqlite:worktime.sqlite", vec![tauri_plugin_sql::Migration {
-          version: 1,
-          description: "init".into(),
-          sql: include_str!("../../migrations/001_init.sql").into(),
-          kind: tauri_plugin_sql::MigrationKind::Up,
-        }])
-        .build(),
-    )
+    .plugin(tauri_plugin_opener::init())
+    .plugin(tauri_plugin_process::init())
+    .plugin(tauri_plugin_updater::Builder::new().build())
     .plugin(
       tauri_plugin_sql::Builder::default()
         .add_migrations("sqlite:worktime.sqlite", vec![tauri_plugin_sql::Migration {

@@ -1,7 +1,7 @@
 {
   "name": "KTimeTracker",
   "private": true,
-  "version": "1.0.2",
+  "version": "0.1.2",
   "type": "module",
   "scripts": {
     "migrate:sync": "node scripts/sync-migrations.mjs",
