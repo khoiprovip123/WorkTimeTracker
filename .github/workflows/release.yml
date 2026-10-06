@@ -30,7 +30,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
           cache: npm
 
       - name: Setup Rust
@@ -57,7 +57,7 @@ jobs:
           npm cache clean --force
 
       - name: Install Node dependencies
-        run: npm install --include=optional
+        run: npm install --no-fund --no-audit
 
       - name: Validate updater signing env
         shell: bash

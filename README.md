@@ -162,3 +162,8 @@ npm install
 - `src-tauri/`: ứng dụng Tauri / Rust
 - `migrations/`: SQL migration
 - `scripts/sync-migrations.mjs`: đồng bộ migration vào app
+
+
+
+git tag -f v0.1.2
+git push origin v0.1.2 --force
