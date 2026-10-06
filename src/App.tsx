@@ -6,7 +6,7 @@ import { calculateLateMinutes, calculateRequiredCheckout, calculateWorkedMinutes
 import { getDashboardData, useAppStore } from './lib/store';
 import { formatMinutes, formatMonthVi, formatRange, formatSigned, formatViDate, hmOrDash, hmToMinutes, isoDate, minutesToHm, mondayOf, nowHm, parseIso, todayIso, weekDates } from './lib/time';
 
-const GITHUB_RELEASE_REPO = 'YOUR_USERNAME/YOUR_REPO';
+const GITHUB_RELEASE_REPO = 'khoiprovip123/WorkTimeTracker';
 
 function formatDurationHms(totalSeconds: number): string {
   const safe = Math.max(0, Math.round(totalSeconds));
