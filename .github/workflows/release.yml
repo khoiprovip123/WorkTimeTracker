@@ -49,8 +49,15 @@ jobs:
             pkg-config
         shell: bash
 
+      - name: Clean install state for Node dependencies
+        shell: bash
+        run: |
+          rm -rf node_modules
+          rm -f package-lock.json
+          npm cache clean --force
+
       - name: Install Node dependencies
-        run: npm ci
+        run: npm install --include=optional
 
       - name: Validate updater signing env
         shell: bash
