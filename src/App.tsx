@@ -3,8 +3,6 @@ declare const __APP_VERSION__: string;
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { relaunch } from '@tauri-apps/plugin-process';
-import { check, type Update } from '@tauri-apps/plugin-updater';
 import { useEffect, useMemo, useState } from 'react';
 import { calculateLateMinutes, calculateRequiredCheckout, calculateWorkedMinutes, isDailyTargetMet, projectCheckout } from './lib/calculator';
 import { getDashboardData, useAppStore } from './lib/store';
@@ -58,12 +56,14 @@ function pickBestReleaseAsset(assets: Array<{ name?: string; browser_download_ur
   };
 
   const patterns = preferredPatterns[platform];
-  const asset = assets.find((item) => {
+  const validAssets = assets.filter((item) => {
     const name = (item.name ?? '').toLowerCase();
-    return patterns.some((pattern) => name.includes(pattern));
+    if (!patterns.some((pattern) => name.includes(pattern))) return false;
+    if (name.includes('.xml') || name.includes('.json') || name.includes('.sig') || name.includes('.txt')) return false;
+    return Boolean(item.browser_download_url);
   });
 
-  return asset?.browser_download_url ?? assets[0]?.browser_download_url ?? '';
+  return validAssets[0]?.browser_download_url ?? '';
 }
 
 // function StatusBadge({ value }: { value: number }) {
@@ -121,7 +121,6 @@ export default function App() {
   const [calendarView, setCalendarView] = useState<'week' | 'month'>('week');
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState(__APP_VERSION__);
-  const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   const [updateStatus, setUpdateStatus] = useState<{ state: 'idle' | 'checking' | 'up-to-date' | 'new-version' | 'error'; message: string; latestVersion?: string; downloadUrl?: string }>({
     state: 'idle',
     message: 'Chưa kiểm tra phiên bản.',
@@ -327,40 +326,14 @@ export default function App() {
 
   const handleCheckVersion = async () => {
     setUpdateStatus({ state: 'checking', message: 'Đang kiểm tra phiên bản mới...' });
-    setPendingUpdate(null);
 
     if (import.meta.env.DEV) {
       setUpdateStatus({
         state: 'up-to-date',
-        message: 'Bạn đang chạy bản dev local. Cập nhật thực tế chỉ áp dụng cho release đã ký.',
+        message: 'Bạn đang chạy bản dev local. Chỉ kiểm tra release trên GitHub khi build release thật.',
         latestVersion: appVersion,
       });
       return;
-    }
-
-    try {
-      if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-        const tauriUpdate = await check();
-
-        if (tauriUpdate) {
-          setPendingUpdate(tauriUpdate);
-          setUpdateStatus({
-            state: 'new-version',
-            message: `Có bản mới ${tauriUpdate.version}. Bạn đang dùng ${appVersion}.`,
-            latestVersion: tauriUpdate.version,
-          });
-          return;
-        }
-
-        setUpdateStatus({
-          state: 'up-to-date',
-          message: `Bạn đang dùng phiên bản mới nhất (${appVersion}).`,
-          latestVersion: appVersion,
-        });
-        return;
-      }
-    } catch (tauriError) {
-      console.warn('Tauri updater not available, falling back to GitHub releases API:', tauriError);
     }
 
     try {
@@ -386,7 +359,7 @@ export default function App() {
           state: 'up-to-date',
           message: `Bạn đang dùng phiên bản mới nhất (${appVersion}).`,
           latestVersion,
-          downloadUrl,
+          downloadUrl: '',
         });
         return;
       }
@@ -407,21 +380,9 @@ export default function App() {
     if (import.meta.env.DEV) {
       setUpdateStatus({
         state: 'error',
-        message: 'Bản dev local không auto install update. Hãy build release thật để kiểm tra cập nhật.',
+        message: 'Bản dev không install update trực tiếp. Hãy build release thật và mở link download trên GitHub.',
       });
       return;
-    }
-
-    if (pendingUpdate) {
-      setUpdateStatus({ state: 'checking', message: 'Đang tải và cài đặt bản mới...' });
-
-      try {
-        await pendingUpdate.downloadAndInstall();
-        await relaunch();
-        return;
-      } catch (error) {
-        console.warn('Tauri updater install failed, using browser fallback:', error);
-      }
     }
 
     if (!updateStatus.downloadUrl) {
@@ -878,13 +839,12 @@ export default function App() {
                   {updateStatus.state === 'checking' ? 'Đang kiểm tra...' : 'Check update'}
                 </button>
 
-                {(updateStatus.state === 'new-version' || updateStatus.downloadUrl) && (
+                {updateStatus.state === 'new-version' && updateStatus.downloadUrl && (
                   <button
                     className="button-secondary w-full"
                     onClick={() => void handleInstallUpdate()}
-                    disabled={updateStatus.state === 'checking'}
                   >
-                    {pendingUpdate ? 'Install update' : 'Mở download release'}
+                    Mở download release
                   </button>
                 )}
 
