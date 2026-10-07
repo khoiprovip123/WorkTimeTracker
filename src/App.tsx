@@ -4,6 +4,7 @@ import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useEffect, useMemo, useState } from 'react';
+import RocketChatNotifications from './components/RocketChatNotifications';
 import { calculateLateMinutes, calculateRequiredCheckout, calculateWorkedMinutes, isDailyTargetMet, projectCheckout } from './lib/calculator';
 import { getDashboardData, useAppStore } from './lib/store';
 import { formatMinutes, formatMonthVi, formatRange, formatSigned, formatViDate, hmOrDash, hmToMinutes, isoDate, minutesToHm, mondayOf, nowHm, parseIso, todayIso, weekDates } from './lib/time';
@@ -117,7 +118,7 @@ export default function App() {
   }));
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [liveNow, setLiveNow] = useState(Date.now());
-  const [view, setView] = useState<'dashboard' | 'calendar' | 'settings'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'calendar' | 'settings' | 'notifications'>('dashboard');
   const [calendarView, setCalendarView] = useState<'week' | 'month'>('week');
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState(__APP_VERSION__);
@@ -459,6 +460,12 @@ export default function App() {
               >
                 Cài đặt
               </button>
+              <button
+                className={`rounded-full px-4 py-2 text-sm font-medium transition ${view === 'notifications' ? 'bg-emerald-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800'}`}
+                onClick={() => setView('notifications')}
+              >
+                TMT Notify
+              </button>
             </nav>
 
             <div className="card flex items-center gap-3 px-4 py-3">
@@ -468,7 +475,13 @@ export default function App() {
           </div>
         </header>
 
-        {view === 'dashboard' ? (
+        <div className={view === 'notifications' ? 'block' : 'hidden'}>
+          <section className="space-y-6">
+            <RocketChatNotifications />
+          </section>
+        </div>
+
+        {view === 'dashboard' && (
           <>
             <section className="mb-6 grid gap-4 md:grid-cols-3">
               <div className="card p-5">
@@ -685,7 +698,8 @@ export default function App() {
               </div>
             </section>
           </>
-        ) : view === 'calendar' ? (
+            )}
+            {view === 'calendar' && (
           <section className="mb-6">
             <div className="card p-5">
               <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -762,7 +776,9 @@ export default function App() {
               </div>
             </div>
           </section>
-        ) : (
+        )}
+
+        {view === 'settings' && (
           <section className="mb-6 grid gap-6 lg:grid-cols-[1fr_1.5fr]">
             <div className="card p-5">
               <h2 className="mb-4 text-lg font-semibold text-white">Cài đặt hệ thống</h2>
