@@ -1,0 +1,294 @@
+import { useEffect, useRef, useState } from 'react';
+import { buildRocketChatLoginPayload, buildStreamRoomSubscription, extractRocketChatSubscriptions, findNotificationSubscription, normalizeRocketChatMessage, type RocketChatNotificationMessage, type RocketChatSubscription } from '../lib/rocket-chat';
+import RocketChatNotifications, { type RocketChatNotificationConfig } from './RocketChatNotifications';
+
+const STORAGE_KEY = 'ktt-rocket-chat-config';
+const DEFAULT_CONFIG: RocketChatNotificationConfig = {
+  serverUrl: 'https://rc.public.tpos.app',
+  userId: '',
+  authToken: '',
+  roomName: 'TMT Notification',
+};
+
+function getStoredConfig() {
+  if (typeof window === 'undefined') return DEFAULT_CONFIG;
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_CONFIG;
+
+    return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_CONFIG;
+  }
+}
+
+function normalizeServerUrl(value: string) {
+  return value.trim().replace(/\/+$/, '');
+}
+
+function buildHeaders(config: RocketChatNotificationConfig) {
+  const authToken = (config.authToken ?? '').trim();
+  const userId = (config.userId ?? '').trim();
+
+  return {
+    'Content-Type': 'application/json',
+    'X-User-Id': userId,
+    'X-Auth-Token': authToken,
+    Authorization: authToken ? `Bearer ${authToken}` : '',
+  };
+}
+
+async function readRocketChatError(response: Response) {
+  try {
+    const payload = await response.json() as { error?: string; message?: string; reason?: string; details?: string };
+    const message = payload.error || payload.message || payload.reason || payload.details || 'Rocket.Chat trả về lỗi không rõ nguyên nhân.';
+    return `${response.status} ${response.statusText}: ${message}`;
+  } catch {
+    return `${response.status} ${response.statusText}: Rocket.Chat trả về lỗi không xác định.`;
+  }
+}
+
+export default function RocketChatConnection({ activeTab }: { activeTab: 'dashboard' | 'calendar' | 'settings' | 'notifications' }) {
+  const [config, setConfig] = useState<RocketChatNotificationConfig>(() => getStoredConfig());
+  const [connectionState, setConnectionState] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
+  const [error, setError] = useState<string | null>(null);
+  const [subscription, setSubscription] = useState<RocketChatSubscription | null>(null);
+  const [notificationHistory, setNotificationHistory] = useState<RocketChatNotificationMessage[]>([]);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const wsRef = useRef<WebSocket | null>(null);
+  const roomIdRef = useRef<string>('');
+  const reconnectTimerRef = useRef<number | null>(null);
+  const pingTimerRef = useRef<number | null>(null);
+  const isManualCloseRef = useRef(false);
+
+  const clearReconnectTimer = () => {
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  };
+
+  const clearPingTimer = () => {
+    if (pingTimerRef.current !== null) {
+      window.clearInterval(pingTimerRef.current);
+      pingTimerRef.current = null;
+    }
+  };
+
+  const disconnectSocket = () => {
+    isManualCloseRef.current = true;
+    clearReconnectTimer();
+    clearPingTimer();
+
+    if (wsRef.current) {
+      wsRef.current.onclose = null;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+  };
+
+  const scheduleReconnect = () => {
+    clearReconnectTimer();
+
+    reconnectTimerRef.current = window.setTimeout(() => {
+      if (!isManualCloseRef.current) {
+        void connect();
+      }
+    }, 4000);
+  };
+
+  const syncInitialHistory = async (roomId: string, serverUrl: string) => {
+    if (!roomId || !config.userId || !config.authToken) return;
+
+    setIsSyncing(true);
+    try {
+      const response = await fetch(`${normalizeServerUrl(serverUrl)}/api/v1/im.history?roomId=${encodeURIComponent(roomId)}&count=20`, {
+        headers: buildHeaders(config),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Không thể load lịch sử khi kết nối Rocket.Chat: ${await readRocketChatError(response)}`);
+      }
+
+      const payload = await response.json() as { messages?: Array<{ _id?: string; rid?: string; msg?: string; text?: string; ts?: string | { $date?: string }; u?: { username?: string } }> };
+      const messages = (payload.messages ?? [])
+        .map((item) => normalizeRocketChatMessage({ fields: { rid: item.rid, args: [item] } }))
+        .filter(Boolean) as RocketChatNotificationMessage[];
+
+      setNotificationHistory((previous) => {
+        const seen = new Set(previous.map((entry) => entry.id));
+        const next = [...messages.filter((entry) => !seen.has(entry.id)), ...previous].slice(0, 20);
+        return next;
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Không thể đồng bộ lịch sử ban đầu.';
+      setError(message);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const connect = async () => {
+    if (!config.userId || !config.authToken) {
+      setError('Vui lòng nhập Rocket.Chat UserId và AuthToken.');
+      setConnectionState('error');
+      return;
+    }
+
+    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
+    isManualCloseRef.current = false;
+    const serverUrl = normalizeServerUrl(config.serverUrl);
+    setError(null);
+    setConnectionState('connecting');
+
+    try {
+      const subscriptionsResponse = await fetch(`${serverUrl}/api/v1/subscriptions.get`, {
+        headers: buildHeaders(config),
+      });
+
+      if (!subscriptionsResponse.ok) {
+        throw new Error(`Không thể lấy danh sách subscription từ Rocket.Chat: ${await readRocketChatError(subscriptionsResponse)}`);
+      }
+
+      const subscriptionsPayload = await subscriptionsResponse.json();
+      const subscriptions = extractRocketChatSubscriptions(subscriptionsPayload);
+      const nextSubscription = findNotificationSubscription(subscriptions, config.roomName);
+
+      if (!nextSubscription?.rid) {
+        throw new Error(`Không tìm thấy room "${config.roomName}" trong danh sách subscriptions.`);
+      }
+
+      setSubscription(nextSubscription);
+      roomIdRef.current = nextSubscription.rid;
+      disconnectSocket();
+
+      const socket = new WebSocket(`${serverUrl.replace(/^http/, 'ws')}/websocket`);
+      wsRef.current = socket;
+
+      socket.onopen = () => {
+        socket.send(JSON.stringify({ msg: 'connect', version: '1', support: ['1', 'pre2', 'pre1'] }));
+
+        const loginPayload = buildRocketChatLoginPayload(config.authToken);
+        socket.send(JSON.stringify(loginPayload));
+
+        if (nextSubscription.rid) {
+          socket.send(JSON.stringify(buildStreamRoomSubscription(nextSubscription.rid)));
+        }
+
+        clearPingTimer();
+        pingTimerRef.current = window.setInterval(() => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ msg: 'ping' }));
+          }
+        }, 30000);
+
+        setConnectionState('connecting');
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data) as Record<string, unknown>;
+
+          if (payload.msg === 'result' && payload.id === 'rocket-chat-login') {
+            setConnectionState('connected');
+            return;
+          }
+
+          if (payload.collection === 'stream-room-messages') {
+            const message = normalizeRocketChatMessage(payload);
+            if (!message || message.roomId !== nextSubscription.rid) {
+              return;
+            }
+
+            setNotificationHistory((previous) => [message, ...previous.filter((item) => item.id !== message.id)].slice(0, 20));
+          }
+        } catch {
+          // Ignore malformed payloads from websocket; app should keep the socket alive.
+        }
+      };
+
+      socket.onerror = () => {
+        setConnectionState('error');
+        setError('WebSocket đang lỗi hoặc server không phản hồi.');
+      };
+
+      socket.onclose = () => {
+        clearPingTimer();
+
+        if (wsRef.current === socket) {
+          wsRef.current = null;
+        }
+
+        if (!isManualCloseRef.current) {
+          setConnectionState('idle');
+          scheduleReconnect();
+        }
+      };
+
+      await syncInitialHistory(nextSubscription.rid, serverUrl);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Không thể kết nối Rocket.Chat';
+      setError(message);
+      setConnectionState('error');
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+  }, [config]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleBeforeUnload = () => {
+      disconnectSocket();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handleBeforeUnload);
+      disconnectSocket();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'notifications') return;
+
+    if (!config.userId || !config.authToken) {
+      setError('Vui lòng nhập Rocket.Chat UserId và AuthToken.');
+      setConnectionState('error');
+      return;
+    }
+
+    void connect();
+  }, [activeTab, config.userId, config.authToken, config.serverUrl, config.roomName]);
+
+  return (
+    <div className={activeTab === 'notifications' ? 'block' : 'hidden'}>
+      <RocketChatNotifications
+        config={config}
+        onConfigChange={(nextConfig) => setConfig((previous) => ({ ...previous, ...nextConfig }))}
+        connectionState={connectionState}
+        error={error}
+        subscription={subscription}
+        notificationHistory={notificationHistory}
+        isSyncing={isSyncing}
+        onConnect={() => void connect()}
+        onSyncHistory={() => {
+          if (subscription?.rid) {
+            void syncInitialHistory(subscription.rid, normalizeServerUrl(config.serverUrl));
+          }
+        }}
+      />
+    </div>
+  );
+}
