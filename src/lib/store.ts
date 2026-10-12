@@ -1,8 +1,21 @@
-import { create } from 'zustand';
-import { DEFAULT_SETTINGS, buildDayReport, monthReport, weekReport } from './calculator';
-import { deleteWorkLog, getCarryOvers, getLeaveRecords, getSettings, getWorkLogs, saveSettings, upsertWorkLog } from './db';
-import { hmToMinutes, mondayOf, nowHm, todayIso } from './time';
-import type { CarryOver, LeaveRecord, Settings, WorkLog } from './types';
+import { create } from "zustand";
+import {
+  DEFAULT_SETTINGS,
+  buildDayReport,
+  monthReport,
+  weekReport,
+} from "./calculator";
+import {
+  deleteWorkLog,
+  getCarryOvers,
+  getLeaveRecords,
+  getSettings,
+  getWorkLogs,
+  saveSettings,
+  upsertWorkLog,
+} from "./db";
+import { hmToMinutes, mondayOf, nowHm, todayIso } from "./time";
+import type { CarryOver, LeaveRecord, Settings, WorkLog } from "./types";
 
 interface AppState {
   settings: Settings;
@@ -13,7 +26,14 @@ interface AppState {
   isLoading: boolean;
   load: () => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
-  saveLog: (log: Partial<WorkLog> & { date: string; checkIn?: string | null; checkOut?: string | null; note?: string }) => Promise<void>;
+  saveLog: (
+    log: Partial<WorkLog> & {
+      date: string;
+      checkIn?: string | null;
+      checkOut?: string | null;
+      note?: string;
+    },
+  ) => Promise<void>;
   deleteLog: (date: string) => Promise<void>;
 }
 
@@ -46,14 +66,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     const workedMinutes = log.workedMinutes ?? (checkIn && checkOut ? 0 : 0);
     const date = log.date;
 
+    const existing = current.logs.find((item) => item.date === date);
     const normalized: WorkLog = {
-      id: current.logs.find((item) => item.date === date)?.id ?? Date.now(),
+      id: existing?.id ?? Date.now(),
       date,
       checkIn,
       checkOut,
       workedMinutes,
-      requiredMinutes: null,
-      note: log.note ?? '',
+      requiredMinutes: log.requiredMinutes ?? existing?.requiredMinutes ?? null,
+      note: log.note ?? existing?.note ?? "",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -68,7 +89,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 }));
 
-export function getDashboardData(date: string, logs: WorkLog[], leaves: LeaveRecord[], carryOvers: CarryOver[], settings: Settings) {
+export function getDashboardData(
+  date: string,
+  logs: WorkLog[],
+  leaves: LeaveRecord[],
+  carryOvers: CarryOver[],
+  settings: Settings,
+) {
   const log = logs.find((item) => item.date === date) ?? undefined;
   const nowMinutes = hmToMinutes(nowHm()) ?? 0;
 

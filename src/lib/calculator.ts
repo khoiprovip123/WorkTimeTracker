@@ -5,7 +5,15 @@
  * Quy ước: `today` = ngày hiện tại (ISO), `nowMinutes` = phút của giờ hiện tại
  * trong `today`. Truyền tường bạch để mọi hàm test được, không phụ thuộc đồng hồ máy.
  */
-import { addDays, hmToMinutes, minutesToHm, mondayOf, weekDates, weekday, workingDates } from './time';
+import {
+  addDays,
+  hmToMinutes,
+  minutesToHm,
+  mondayOf,
+  weekDates,
+  weekday,
+  workingDates,
+} from "./time";
 import type {
   CarryOver,
   CheckoutTarget,
@@ -15,7 +23,7 @@ import type {
   PeriodReport,
   Settings,
   WorkLog,
-} from './types';
+} from "./types";
 
 export const DEFAULT_SETTINGS: Settings = {
   morningStart: 480, // 08:00
@@ -38,7 +46,10 @@ export const DEFAULT_SETTINGS: Settings = {
  */
 function overlap(a: number, b: number, layout: DayLayout): number {
   if (b <= a) return 0;
-  const morning = Math.max(0, Math.min(b, layout.morningEnd) - Math.max(a, layout.morningStart));
+  const morning = Math.max(
+    0,
+    Math.min(b, layout.morningEnd) - Math.max(a, layout.morningStart),
+  );
   const afternoon = Math.max(0, b - Math.max(a, layout.afternoonStart));
   return morning + afternoon;
 }
@@ -63,21 +74,31 @@ export function calculateWorkedMinutes(
   return overlap(ci, layout.standardEnd, layout) + (co - layout.standardEnd);
 }
 
-export function isDailyTargetMet(workedMinutes: number, layout: DayLayout | Settings = DEFAULT_SETTINGS): boolean {
-  const requiredMinutes = 'dailyRequiredMinutes' in layout
-    ? layout.dailyRequiredMinutes
-    : DEFAULT_SETTINGS.dailyRequiredMinutes;
+export function isDailyTargetMet(
+  workedMinutes: number,
+  layout: DayLayout | Settings = DEFAULT_SETTINGS,
+): boolean {
+  const requiredMinutes =
+    "dailyRequiredMinutes" in layout
+      ? layout.dailyRequiredMinutes
+      : DEFAULT_SETTINGS.dailyRequiredMinutes;
   return workedMinutes >= requiredMinutes;
 }
 
 /** Phút đi trễ so với giờ bắt đầu. Đến trước 08:00 không tính. */
-export function calculateLateMinutes(checkIn: string | null, layout: DayLayout = DEFAULT_SETTINGS): number {
+export function calculateLateMinutes(
+  checkIn: string | null,
+  layout: DayLayout = DEFAULT_SETTINGS,
+): number {
   const ci = hmToMinutes(checkIn);
   return ci === null ? 0 : Math.max(0, ci - layout.morningStart);
 }
 
 /** Check-in sau latest_normal_check_in (09:00) -> phải dùng phép. */
-export function needsLeavePermission(checkIn: string | null, layout: DayLayout = DEFAULT_SETTINGS): boolean {
+export function needsLeavePermission(
+  checkIn: string | null,
+  layout: DayLayout = DEFAULT_SETTINGS,
+): boolean {
   const ci = hmToMinutes(checkIn);
   return ci !== null && ci > layout.latestNormalCheckIn;
 }
@@ -102,9 +123,11 @@ export function calculateRequiredCheckout(
   remainingMinutes: number,
   layout: DayLayout = DEFAULT_SETTINGS,
 ): CheckoutTarget {
-  if (remainingMinutes <= 0) return { time: null, remainingMinutes: 0, past: false, midnight: false };
+  if (remainingMinutes <= 0)
+    return { time: null, remainingMinutes: 0, past: false, midnight: false };
   const ci = hmToMinutes(checkIn);
-  if (ci === null) return { time: null, remainingMinutes, past: false, midnight: false };
+  if (ci === null)
+    return { time: null, remainingMinutes, past: false, midnight: false };
 
   const start = Math.max(ci, layout.morningStart);
   const candidates: number[] = [];
@@ -115,12 +138,22 @@ export function calculateRequiredCheckout(
     if (t <= layout.morningEnd) candidates.push(t);
   }
   // 2) Đã qua nghỉ trưa: trừ nghỉ (nếu nghỉ còn nằm phía sau start).
-  const rest = Math.max(0, layout.afternoonStart - Math.max(start, layout.morningEnd));
+  const rest = Math.max(
+    0,
+    layout.afternoonStart - Math.max(start, layout.morningEnd),
+  );
   const t2 = start + remainingMinutes + rest;
-  if (t2 >= layout.afternoonStart || start >= layout.afternoonStart) candidates.push(t2);
+  if (t2 >= layout.afternoonStart || start >= layout.afternoonStart)
+    candidates.push(t2);
 
-  if (candidates.length === 0) return { time: '00:00', remainingMinutes, past: false, midnight: true };
-  return { time: minutesToHm(Math.min(...candidates)), remainingMinutes, past: false, midnight: false };
+  if (candidates.length === 0)
+    return { time: "00:00", remainingMinutes, past: false, midnight: true };
+  return {
+    time: minutesToHm(Math.min(...candidates)),
+    remainingMinutes,
+    past: false,
+    midnight: false,
+  };
 }
 
 /**
@@ -139,9 +172,15 @@ export function projectCheckout(input: {
 }): CheckoutTarget {
   const layout = input.layout ?? DEFAULT_SETTINGS;
   const remaining = input.requiredMinutes - input.workedMinutes;
-  if (remaining <= 0) return { time: null, remainingMinutes: 0, past: false, midnight: false };
+  if (remaining <= 0)
+    return { time: null, remainingMinutes: 0, past: false, midnight: false };
   if (input.nowMinutes > layout.standardEnd) {
-    return { time: null, remainingMinutes: remaining, past: true, midnight: false };
+    return {
+      time: null,
+      remainingMinutes: remaining,
+      past: true,
+      midnight: false,
+    };
   }
   return calculateRequiredCheckout(input.checkIn, remaining, layout);
 }
@@ -237,24 +276,41 @@ export function buildDayReport(input: DayReportInput): DayReport {
   const log = input.log;
   const leaveMinutes = input.leaveMinutes ?? 0;
   const isWorkingDay = !isWeekend(input.date, input.weekendDays);
-  const worked = calculateWorkedMinutes(log?.checkIn ?? null, log?.checkOut ?? null, settings) ?? 0;
-  const finished = isDayFinished(input.date, log, input.today, input.nowMinutes, settings);
+  const worked =
+    calculateWorkedMinutes(
+      log?.checkIn ?? null,
+      log?.checkOut ?? null,
+      settings,
+    ) ?? 0;
+  const finished = isDayFinished(
+    input.date,
+    log,
+    input.today,
+    input.nowMinutes,
+    settings,
+  );
   // "Nghỉ" giữa buổi chiều (17:30 -> afternoonStart + độ dài nghỉ trưa) không được
   // tính là giờ dôi. Ca sáng về sớm vì vậy vẫn đúng 8h, không phải dư 90'.
-  const longLunch = settings.standardEnd + (settings.afternoonStart - settings.morningEnd);
-  const overtime = Math.max(0, worked - Math.max(settings.dailyRequiredMinutes, longLunch));
+  const longLunch =
+    settings.standardEnd + (settings.afternoonStart - settings.morningEnd);
+  const overtime = Math.max(
+    0,
+    worked - Math.max(settings.dailyRequiredMinutes, longLunch),
+  );
 
   // Ngày mang nợ carry-over hoặc ghi chỉ tiêu riêng: giữ đúng chỉ tiêu đó.
   // Ngày thường đã kết thúc: làm đủ 8h, giờ dôi tính vào quỹ bù giờ chung.
   // Ngày nghỉ (T7) mà đi làm: cấn vào chỉ tiêu tuần, mặc định 480 - 2400/5 = 0.
   // Ngày phép: trả lại đúng số phút đã duyệt.
-  const required = !isWorkingDay || !finished
-    ? 0
-    : (log?.requiredMinutes ??
-       (isWeekday(input.date, input.weekendDays)
-         ? settings.dailyRequiredMinutes
-         : settings.dailyRequiredMinutes - Math.round(settings.weeklyRequiredMinutes / WEEK_DAYS)) +
-         (input.carryMinutes ?? 0));
+  const required =
+    !isWorkingDay || !finished
+      ? 0
+      : (log?.requiredMinutes ??
+        (isWeekday(input.date, input.weekendDays)
+          ? settings.dailyRequiredMinutes
+          : settings.dailyRequiredMinutes -
+            Math.round(settings.weeklyRequiredMinutes / WEEK_DAYS)) +
+          (input.carryMinutes ?? 0));
 
   return {
     date: input.date,
@@ -271,7 +327,7 @@ export function buildDayReport(input: DayReportInput): DayReport {
     hasLog: Boolean(log),
     isWorkingDay,
     carry: null,
-    note: log?.note ?? '',
+    note: log?.note ?? "",
   };
 }
 
@@ -298,12 +354,19 @@ export function buildPeriodReport(input: {
   const dates = workingDates(input.from, input.to, input.weekendDays);
   const byDate = new Map(input.logs.map((l) => [l.date, l]));
   const leaveByDate = new Map<string, number>();
-  for (const lv of input.leaves) leaveByDate.set(lv.date, (leaveByDate.get(lv.date) ?? 0) + lv.minutes);
+  for (const lv of input.leaves)
+    leaveByDate.set(lv.date, (leaveByDate.get(lv.date) ?? 0) + lv.minutes);
   const carryByDate = new Map<string, number>();
   for (const c of input.carryOvers ?? []) {
-    if (!c.resolved) carryByDate.set(c.targetDate, (carryByDate.get(c.targetDate) ?? 0) + c.minutes);
+    if (!c.resolved)
+      carryByDate.set(
+        c.targetDate,
+        (carryByDate.get(c.targetDate) ?? 0) + c.minutes,
+      );
   }
-  const carryBySource = new Map((input.carryOvers ?? []).map((c) => [c.sourceDate, c]));
+  const carryBySource = new Map(
+    (input.carryOvers ?? []).map((c) => [c.sourceDate, c]),
+  );
 
   const days = dates.map((date) => {
     const day = buildDayReport({
@@ -340,7 +403,10 @@ export function buildPeriodReport(input: {
   // Cân đối kỳ = giờ đã làm + phép - chỉ tiêu, cộng phần dôi thật (đã trừ "nghỉ chiều").
   const surplusMinutes = overtimeMinutes;
   const balance = workedMinutes + leaveMinutes - requiredMinutes;
-  const debtMinutes = Math.max(0, requiredMinutes + leaveMinutes - workedMinutes);
+  const debtMinutes = Math.max(
+    0,
+    requiredMinutes + leaveMinutes - workedMinutes,
+  );
   const daysLeft = dates.filter((d) => d > input.today).length;
   const perDay = elapsedDays > 0 ? balance / elapsedDays : 0;
 
@@ -387,9 +453,9 @@ export function monthReport(input: {
   today: string;
   nowMinutes: number | null;
 }): PeriodReport {
-  const [y, m] = input.monthKey.split('-').map(Number);
+  const [y, m] = input.monthKey.split("-").map(Number);
   const last = new Date(y!, m!, 0).getDate();
-  const pad = (n: number) => String(n).padStart(2, '0');
+  const pad = (n: number) => String(n).padStart(2, "0");
   return buildPeriodReport({
     ...input,
     from: `${input.monthKey}-${pad(1)}`,

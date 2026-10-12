@@ -1,7 +1,7 @@
 /** Định dạng / chuyển đổi ngày giờ. Mọi tính toán nghiệp vụ dùng phút (số nguyên). */
 
 export function pad2(n: number): string {
-  return String(n).padStart(2, '0');
+  return String(n).padStart(2, "0");
 }
 
 /** Cho phép > 24h ("25:00") để biểu thị giờ về của ca tràn sang ngày hôm sau. */
@@ -20,13 +20,23 @@ export function hmToMinutes(hm: string | null | undefined): number | null {
   return h * 60 + mi;
 }
 
+/** Chuẩn hóa giờ người dùng nhập về HH:mm để lưu và tính toán. */
+export function normalizeHmInput(value: string): string | null {
+  const match = /^(\d{1,2}):(\d{2})(?::00)?$/.exec(value.trim());
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return `${pad2(hours)}:${pad2(minutes)}`;
+}
+
 /** "08:00" -> "08:00", null -> "—" */
 export function hmOrDash(hm: string | null | undefined): string {
-  return hm ? hm : '—';
+  return hm ? hm : "—";
 }
 
 export function formatMinutes(mins: number): string {
-  const sign = mins < 0 ? '-' : '';
+  const sign = mins < 0 ? "-" : "";
   const m = Math.abs(Math.round(mins));
   const h = Math.floor(m / 60);
   return h > 0 ? `${sign}${h}h${pad2(m % 60)}` : `${sign}${m}m`;
@@ -34,8 +44,8 @@ export function formatMinutes(mins: number): string {
 
 /** Có dấu, dùng cho cột Balance: +30m / -30m / 0 */
 export function formatSigned(mins: number): string {
-  if (mins === 0) return '0';
-  return `${mins > 0 ? '+' : '-'}${formatMinutes(Math.abs(mins)).replace(/^-/, '')}`;
+  if (mins === 0) return "0";
+  return `${mins > 0 ? "+" : "-"}${formatMinutes(Math.abs(mins)).replace(/^-/, "")}`;
 }
 
 /** 90 -> "1 giờ 30 phút", -90 -> "1 giờ 30 phút" (mất dấu, caller tự thêm chữ thiếu/dư) */
@@ -47,7 +57,7 @@ export function formatMinutesVi(mins: number): string {
   return r === 0 ? `${h} giờ` : `${h} giờ ${r} phút`;
 }
 
-const WD = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+const WD = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
 
 export function isValidIsoDate(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -92,7 +102,11 @@ export function monthKey(iso: string): string {
 }
 
 /** Ngày làm việc trong khoảng [from, to] inclusive, trừ các thứ theo `weekendDays` (0 = CN). */
-export function workingDates(fromIso: string, toIso: string, weekendDays: number[] = [0]): string[] {
+export function workingDates(
+  fromIso: string,
+  toIso: string,
+  weekendDays: number[] = [0],
+): string[] {
   const out: string[] = [];
   const end = parseIso(toIso).getTime();
   for (let t = parseIso(fromIso).getTime(); t <= end; t += 86_400_000) {
@@ -115,12 +129,22 @@ export function formatRange(fromIso: string, toIso: string): string {
 }
 
 const MONTHS_VI = [
-  'Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6',
-  'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12',
+  "Tháng 1",
+  "Tháng 2",
+  "Tháng 3",
+  "Tháng 4",
+  "Tháng 5",
+  "Tháng 6",
+  "Tháng 7",
+  "Tháng 8",
+  "Tháng 9",
+  "Tháng 10",
+  "Tháng 11",
+  "Tháng 12",
 ];
 
 export function formatMonthVi(key: string): string {
-  const [y, m] = key.split('-').map(Number);
+  const [y, m] = key.split("-").map(Number);
   return `${MONTHS_VI[(m ?? 1) - 1]} ${y}`;
 }
 

@@ -1,5 +1,13 @@
-import { formatMinutes, formatSigned, formatViDate, hmOrDash, minutesToHm } from '../lib/time';
-import type { Settings, WorkLog } from '../lib/types';
+import { useState } from "react";
+import {
+  formatMinutes,
+  formatSigned,
+  formatViDate,
+  hmOrDash,
+  minutesToHm,
+  normalizeHmInput,
+} from "../lib/time";
+import type { Settings, WorkLog } from "../lib/types";
 
 export type DashboardTabProps = {
   today: string;
@@ -11,7 +19,7 @@ export type DashboardTabProps = {
   elapsedSeconds: number;
   remainingSeconds: number;
   progressPercent: number;
-  todayStatus: 'idle' | 'working' | 'complete' | 'missing';
+  todayStatus: "idle" | "working" | "complete" | "missing";
   dailyRequiredMinutes: number;
   currentWorkedMinutes: number;
   remainingTodayMinutes: number;
@@ -24,10 +32,15 @@ export type DashboardTabProps = {
   };
   logs: WorkLog[];
   onPrimaryAction: () => void;
-  onLunchSettingChange: (field: 'morningEnd' | 'afternoonStart', value: string) => void;
+  onLunchSettingChange: (
+    field: "morningEnd" | "afternoonStart",
+    value: string,
+  ) => void;
   onSubmit: () => void;
-  setForm: React.Dispatch<React.SetStateAction<{ date: string; checkIn: string; checkOut: string }>>;
-  setEditingDate: (date: string | null) => void;
+  setForm: React.Dispatch<
+    React.SetStateAction<{ date: string; checkIn: string; checkOut: string }>
+  >;
+  onEditLog: (date: string, checkIn: string | null, checkOut: string | null) => Promise<void>;
   deleteLog: (date: string) => Promise<void>;
 };
 
@@ -36,7 +49,9 @@ function formatDurationHms(totalSeconds: number): string {
   const hours = Math.floor(safe / 3600);
   const minutes = Math.floor((safe % 3600) / 60);
   const seconds = safe % 60;
-  return [hours, minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':');
+  return [hours, minutes, seconds]
+    .map((value) => String(value).padStart(2, "0"))
+    .join(":");
 }
 
 export default function DashboardTab({
@@ -62,9 +77,38 @@ export default function DashboardTab({
   onLunchSettingChange,
   onSubmit,
   setForm,
-  setEditingDate,
+  onEditLog,
   deleteLog,
 }: DashboardTabProps) {
+  const [edit, setEdit] = useState<{ date: string; checkIn: string; checkOut: string } | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const submitEdit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!edit || savingEdit) return;
+    const checkIn = edit.checkIn.trim() ? normalizeHmInput(edit.checkIn) : null;
+    const checkOut = edit.checkOut.trim() ? normalizeHmInput(edit.checkOut) : null;
+    if ((edit.checkIn.trim() && !checkIn) || (edit.checkOut.trim() && !checkOut)) {
+      setEditError("Giờ không hợp lệ. Hãy nhập theo dạng 08:30 (0–23 giờ, 0–59 phút).");
+      return;
+    }
+    if (checkOut && !checkIn) {
+      setEditError("Cần nhập giờ check-in trước khi nhập check-out.");
+      return;
+    }
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      await onEditLog(edit.date, checkIn, checkOut);
+      setEdit(null);
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : "Không thể lưu thay đổi. Vui lòng thử lại.");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   return (
     <>
       <section className="mb-6 grid gap-4 md:grid-cols-3">
@@ -73,25 +117,53 @@ export default function DashboardTab({
             <p className="text-sm text-slate-400">HÔM NAY</p>
             <span
               className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
-                todayStatus === 'working'
-                  ? 'border-blue-500/30 bg-blue-500/10 text-blue-200'
-                  : todayStatus === 'complete'
-                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-                    : todayStatus === 'missing'
-                      ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
-                      : 'border-slate-600 bg-slate-800 text-slate-200'
+                todayStatus === "working"
+                  ? "border-blue-500/30 bg-blue-500/10 text-blue-200"
+                  : todayStatus === "complete"
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                    : todayStatus === "missing"
+                      ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
+                      : "border-slate-600 bg-slate-800 text-slate-200"
               }`}
             >
-              {todayStatus === 'working' ? 'Đang làm' : todayStatus === 'complete' ? 'Đủ giờ' : todayStatus === 'missing' ? 'Thiếu giờ' : 'Chưa bắt đầu'}
+              {todayStatus === "working"
+                ? "Đang làm"
+                : todayStatus === "complete"
+                  ? "Đủ giờ"
+                  : todayStatus === "missing"
+                    ? "Thiếu giờ"
+                    : "Chưa bắt đầu"}
             </span>
           </div>
           <div className="space-y-2 text-sm text-slate-200">
-            <div className="flex justify-between"><span>Check-in</span><span>{hmOrDash(currentLog?.checkIn ?? '--')}</span></div>
-            <div className="flex justify-between"><span>Check-out</span><span>{!currentLog?.checkOut ? '--' : hmOrDash(currentLog.checkOut)}</span></div>
-            <div className="flex justify-between"><span>Đã làm</span><span>{formatMinutes(currentWorkedMinutes)}</span></div>
-            <div className="flex justify-between"><span>Mục tiêu</span><span>{formatMinutes(dailyRequiredMinutes)}</span></div>
             <div className="flex justify-between">
-              <span>{activeSession ? 'Còn lại' : currentLog?.checkOut ? (currentWorkedMinutes >= dailyRequiredMinutes ? 'Còn lại' : 'Thiếu') : 'Còn lại'}</span>
+              <span>Check-in</span>
+              <span>{hmOrDash(currentLog?.checkIn ?? "--")}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Check-out</span>
+              <span>
+                {!currentLog?.checkOut ? "--" : hmOrDash(currentLog.checkOut)}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Đã làm</span>
+              <span>{formatMinutes(currentWorkedMinutes)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Mục tiêu</span>
+              <span>{formatMinutes(dailyRequiredMinutes)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>
+                {activeSession
+                  ? "Còn lại"
+                  : currentLog?.checkOut
+                    ? currentWorkedMinutes >= dailyRequiredMinutes
+                      ? "Còn lại"
+                      : "Thiếu"
+                    : "Còn lại"}
+              </span>
               <span>
                 {activeSession
                   ? formatSigned(remainingTodayMinutes)
@@ -103,13 +175,17 @@ export default function DashboardTab({
               </span>
             </div>
             <div className="flex justify-between">
-              <span>{activeSession ? 'Dự kiến đủ giờ' : 'Trạng thái'}</span>
+              <span>{activeSession ? "Dự kiến đủ giờ" : "Trạng thái"}</span>
               <span>
                 {activeSession
-                  ? (currentLog?.checkIn ? `Ngày ${today}` : '—')
+                  ? currentLog?.checkIn
+                    ? `Ngày ${today}`
+                    : "—"
                   : currentLog?.checkOut
-                    ? (currentWorkedMinutes >= dailyRequiredMinutes ? 'Đủ giờ' : 'Thiếu giờ')
-                    : 'Chưa bắt đầu'}
+                    ? currentWorkedMinutes >= dailyRequiredMinutes
+                      ? "Đủ giờ"
+                      : "Thiếu giờ"
+                    : "Chưa bắt đầu"}
               </span>
             </div>
           </div>
@@ -120,10 +196,24 @@ export default function DashboardTab({
             <p className="text-sm text-slate-400">TUẦN NÀY</p>
           </div>
           <div className="space-y-2 text-sm text-slate-200">
-            <div className="flex justify-between"><span>Đã làm</span><span>{formatMinutes(dashboard.week.workedMinutes)}</span></div>
-            <div className="flex justify-between"><span>Yêu cầu</span><span>{formatMinutes(dashboard.week.requiredMinutes || 2400)}</span></div>
-            <div className="flex justify-between"><span>Thiếu/Dư</span><span>{formatSigned(dashboard.week.balance)}</span></div>
-            <div className="flex justify-between"><span>Carry-over</span><span>{formatSigned(0)}</span></div>
+            <div className="flex justify-between">
+              <span>Đã làm</span>
+              <span>{formatMinutes(dashboard.week.workedMinutes)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Yêu cầu</span>
+              <span>
+                {formatMinutes(dashboard.week.requiredMinutes || 2400)}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Thiếu/Dư</span>
+              <span>{formatSigned(dashboard.week.balance)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Carry-over</span>
+              <span>{formatSigned(0)}</span>
+            </div>
           </div>
         </div>
 
@@ -132,61 +222,91 @@ export default function DashboardTab({
             <p className="text-sm text-slate-400">THÁNG NÀY</p>
           </div>
           <div className="space-y-2 text-sm text-slate-200">
-            <div className="flex justify-between"><span>Đã làm</span><span>{formatMinutes(dashboard.month.workedMinutes)}</span></div>
-            <div className="flex justify-between"><span>Yêu cầu</span><span>{formatMinutes(dashboard.month.requiredMinutes || 0)}</span></div>
-            <div className="flex justify-between"><span>Thiếu/Dư</span><span>{formatSigned(dashboard.month.balance)}</span></div>
+            <div className="flex justify-between">
+              <span>Đã làm</span>
+              <span>{formatMinutes(dashboard.month.workedMinutes)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Yêu cầu</span>
+              <span>{formatMinutes(dashboard.month.requiredMinutes || 0)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Thiếu/Dư</span>
+              <span>{formatSigned(dashboard.month.balance)}</span>
+            </div>
           </div>
         </div>
       </section>
 
       <section className="mb-6 grid gap-6 lg:grid-cols-[1.1fr_1.8fr]">
         <div className="card p-5">
-          <h2 className="mb-4 text-lg font-semibold text-white">Nhập giờ làm</h2>
+          <h2 className="mb-4 text-lg font-semibold text-white">
+            Nhập giờ làm
+          </h2>
           <div className="space-y-3">
             <label className="block text-sm text-slate-300">
-              <span className="mb-1 block text-xs uppercase tracking-[0.2em] text-slate-400">Giờ bắt đầu</span>
+              <span className="mb-1 block text-xs uppercase tracking-[0.2em] text-slate-400">
+                Giờ bắt đầu
+              </span>
               <input
                 className="input mt-1 w-full"
                 type="time"
                 value={form.checkIn}
-                onChange={(e) => setForm((prev) => ({ ...prev, checkIn: e.target.value }))}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, checkIn: e.target.value }))
+                }
               />
             </label>
 
             <div className="grid grid-cols-2 gap-3">
               <label className="block text-sm text-slate-300">
-                <span className="mb-1 block text-xs uppercase tracking-[0.2em] text-slate-400">Nghỉ trưa từ</span>
+                <span className="mb-1 block text-xs uppercase tracking-[0.2em] text-slate-400">
+                  Nghỉ trưa từ
+                </span>
                 <input
                   className="input mt-1 w-full"
                   type="time"
                   value={minutesToHm(settings.morningEnd)}
-                  onChange={(e) => void onLunchSettingChange('morningEnd', e.target.value)}
+                  onChange={(e) =>
+                    void onLunchSettingChange("morningEnd", e.target.value)
+                  }
                 />
               </label>
               <label className="block text-sm text-slate-300">
-                <span className="mb-1 block text-xs uppercase tracking-[0.2em] text-slate-400">đến</span>
+                <span className="mb-1 block text-xs uppercase tracking-[0.2em] text-slate-400">
+                  đến
+                </span>
                 <input
                   className="input mt-1 w-full"
                   type="time"
                   value={minutesToHm(settings.afternoonStart)}
-                  onChange={(e) => void onLunchSettingChange('afternoonStart', e.target.value)}
+                  onChange={(e) =>
+                    void onLunchSettingChange("afternoonStart", e.target.value)
+                  }
                 />
               </label>
             </div>
 
             {!currentLog?.checkOut && (
-              <button className="button-primary w-full" onClick={() => void onPrimaryAction()}>
-                {activeSession ? 'Kết thúc ca' : 'Bắt đầu giờ làm'}
+              <button
+                className="button-primary w-full"
+                onClick={() => void onPrimaryAction()}
+              >
+                {activeSession ? "Kết thúc ca" : "Bắt đầu giờ làm"}
               </button>
             )}
 
             <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-3 text-center">
-              <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Thời gian đang làm</div>
+              <div className="text-xs uppercase tracking-[0.24em] text-slate-400">
+                Thời gian đang làm
+              </div>
               <div className="mt-2 font-mono text-3xl font-bold text-emerald-300">
-                {activeSession ? formatDurationHms(elapsedSeconds) : '00:00:00'}
+                {activeSession ? formatDurationHms(elapsedSeconds) : "00:00:00"}
               </div>
               <div className="mt-2 text-xs text-slate-400">
-                {activeSession ? `Bắt đầu lúc ${activeSession.checkIn} · Còn lại ${formatDurationHms(remainingSeconds)}` : 'Chưa có ca làm nào đang chạy'}
+                {activeSession
+                  ? `Bắt đầu lúc ${activeSession.checkIn} · Còn lại ${formatDurationHms(remainingSeconds)}`
+                  : "Chưa có ca làm nào đang chạy"}
               </div>
 
               <div className="mt-4">
@@ -211,31 +331,66 @@ export default function DashboardTab({
 
             <label className="block text-sm text-slate-300">
               <span>Ngày</span>
-              <input className="input mt-1" type="date" value={form.date} onChange={(e) => setForm((prev) => ({ ...prev, date: e.target.value }))} />
+              <input
+                className="input mt-1"
+                type="date"
+                value={form.date}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, date: e.target.value }))
+                }
+              />
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="block text-sm text-slate-300">
                 <span>Check-in</span>
-                <input className="input mt-1" type="time" value={form.checkIn} onChange={(e) => setForm((prev) => ({ ...prev, checkIn: e.target.value }))} />
+                <input
+                  className="input mt-1"
+                  type="time"
+                  value={form.checkIn}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, checkIn: e.target.value }))
+                  }
+                />
               </label>
               <label className="block text-sm text-slate-300">
                 <span>Check-out</span>
-                <input className="input mt-1" type="time" value={form.checkOut} onChange={(e) => setForm((prev) => ({ ...prev, checkOut: e.target.value }))} />
+                <input
+                  className="input mt-1"
+                  type="time"
+                  value={form.checkOut}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, checkOut: e.target.value }))
+                  }
+                />
               </label>
             </div>
             <div className="rounded-xl bg-slate-800/80 p-3 text-sm text-slate-200">
-              <div className="flex justify-between"><span>Đi trễ</span><span>{formatMinutes(late)}</span></div>
-              <div className="mt-2 flex justify-between"><span>Đã làm</span><span>{formatMinutes(worked)}</span></div>
-              <div className="mt-2 flex justify-between"><span>Giờ dự kiến về</span><span>{targetCheckout.time ?? '—'}</span></div>
+              <div className="flex justify-between">
+                <span>Đi trễ</span>
+                <span>{formatMinutes(late)}</span>
+              </div>
+              <div className="mt-2 flex justify-between">
+                <span>Đã làm</span>
+                <span>{formatMinutes(worked)}</span>
+              </div>
+              <div className="mt-2 flex justify-between">
+                <span>Giờ dự kiến về</span>
+                <span>{targetCheckout.time ?? "—"}</span>
+              </div>
             </div>
-            <button className="button-primary w-full" onClick={() => void onSubmit()}>
+            <button
+              className="button-primary w-full"
+              onClick={() => void onSubmit()}
+            >
               Lưu chấm công
             </button>
           </div>
         </div>
 
         <div className="card p-5">
-          <h2 className="mb-4 text-lg font-semibold text-white">Lịch sử công</h2>
+          <h2 className="mb-4 text-lg font-semibold text-white">
+            Lịch sử công
+          </h2>
           <div className="overflow-hidden rounded-xl border border-slate-700">
             <table className="w-full text-left text-sm text-slate-200">
               <thead className="bg-slate-800/90 text-slate-300">
@@ -254,24 +409,36 @@ export default function DashboardTab({
                     <td className="px-3 py-2">{formatViDate(entry.date)}</td>
                     <td className="px-3 py-2">{hmOrDash(entry.checkIn)}</td>
                     <td className="px-3 py-2">{hmOrDash(entry.checkOut)}</td>
-                    <td className="px-3 py-2">{formatMinutes(entry.workedMinutes)}</td>
-                    <td className="px-3 py-2">{formatSigned(entry.workedMinutes - (settings.dailyRequiredMinutes ?? 480))}</td>
+                    <td className="px-3 py-2">
+                      {formatMinutes(entry.workedMinutes)}
+                    </td>
+                    <td className="px-3 py-2">
+                      {formatSigned(
+                        entry.workedMinutes -
+                          (settings.dailyRequiredMinutes ?? 480),
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-right">
                       <div className="flex justify-end gap-2">
                         <button
                           className="button-secondary px-2 py-1 text-xs"
                           onClick={() => {
-                            setEditingDate(entry.date);
-                            setForm({
+                            setEdit({
                               date: entry.date,
-                              checkIn: entry.checkIn ?? '',
-                              checkOut: entry.checkOut ?? '',
+                              checkIn: normalizeHmInput(entry.checkIn ?? "") ?? "",
+                              checkOut: normalizeHmInput(entry.checkOut ?? "") ?? "",
                             });
+                            setEditError(null);
                           }}
                         >
                           Sửa
                         </button>
-                        <button className="button-secondary px-2 py-1 text-xs" onClick={() => void deleteLog(entry.date)}>Xoá</button>
+                        <button
+                          className="button-secondary px-2 py-1 text-xs"
+                          onClick={() => void deleteLog(entry.date)}
+                        >
+                          Xoá
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -281,6 +448,28 @@ export default function DashboardTab({
           </div>
         </div>
       </section>
+      {edit && (
+        <div className="workspace-modal-backdrop" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !savingEdit) setEdit(null);
+        }}>
+          <form className="workspace-modal" role="dialog" aria-modal="true" aria-labelledby="edit-work-log-title" onSubmit={(event) => void submitEdit(event)}>
+            <h2 id="edit-work-log-title">Sửa chấm công · {formatViDate(edit.date)}</h2>
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <label>Check-in
+                <input className="workspace-field" type="time" value={edit.checkIn} onChange={(event) => setEdit({ ...edit, checkIn: event.target.value })} />
+              </label>
+              <label>Check-out
+                <input className="workspace-field" type="time" value={edit.checkOut} onChange={(event) => setEdit({ ...edit, checkOut: event.target.value })} />
+              </label>
+            </div>
+            {editError && <p className="workspace-dialog-notice" role="alert">{editError}</p>}
+            <div className="workspace-modal-actions">
+              <button type="button" disabled={savingEdit} onClick={() => setEdit(null)}>Huỷ</button>
+              <button type="submit" className="button-primary" disabled={savingEdit}>{savingEdit ? "Đang lưu…" : "Lưu thay đổi"}</button>
+            </div>
+          </form>
+        </div>
+      )}
     </>
   );
 }

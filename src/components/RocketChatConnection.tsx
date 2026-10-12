@@ -1,17 +1,27 @@
-import { useEffect, useRef, useState } from 'react';
-import { buildRocketChatLoginPayload, buildStreamRoomSubscription, extractRocketChatSubscriptions, findNotificationSubscription, normalizeRocketChatMessage, type RocketChatNotificationMessage, type RocketChatSubscription } from '../lib/rocket-chat';
-import RocketChatNotifications, { type RocketChatNotificationConfig } from './RocketChatNotifications';
+import { useEffect, useRef, useState } from "react";
+import {
+  buildRocketChatLoginPayload,
+  buildStreamRoomSubscription,
+  extractRocketChatSubscriptions,
+  findNotificationSubscription,
+  normalizeRocketChatMessage,
+  type RocketChatNotificationMessage,
+  type RocketChatSubscription,
+} from "../lib/rocket-chat";
+import RocketChatNotifications, {
+  type RocketChatNotificationConfig,
+} from "./RocketChatNotifications";
 
-const STORAGE_KEY = 'ktt-rocket-chat-config';
+const STORAGE_KEY = "ktt-rocket-chat-config";
 const DEFAULT_CONFIG: RocketChatNotificationConfig = {
-  serverUrl: 'https://rc.public.tpos.app',
-  userId: '',
-  authToken: '',
-  roomName: 'TMT Notification',
+  serverUrl: "https://rc.public.tpos.app",
+  userId: "",
+  authToken: "",
+  roomName: "TMT Notification",
 };
 
 function getStoredConfig() {
-  if (typeof window === 'undefined') return DEFAULT_CONFIG;
+  if (typeof window === "undefined") return DEFAULT_CONFIG;
 
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -24,41 +34,68 @@ function getStoredConfig() {
 }
 
 function normalizeServerUrl(value: string) {
-  return value.trim().replace(/\/+$/, '');
+  return value.trim().replace(/\/+$/, "");
 }
 
 function buildHeaders(config: RocketChatNotificationConfig) {
-  const authToken = (config.authToken ?? '').trim();
-  const userId = (config.userId ?? '').trim();
+  const authToken = (config.authToken ?? "").trim();
+  const userId = (config.userId ?? "").trim();
 
   return {
-    'Content-Type': 'application/json',
-    'X-User-Id': userId,
-    'X-Auth-Token': authToken,
-    Authorization: authToken ? `Bearer ${authToken}` : '',
+    "Content-Type": "application/json",
+    "X-User-Id": userId,
+    "X-Auth-Token": authToken,
+    Authorization: authToken ? `Bearer ${authToken}` : "",
   };
 }
 
 async function readRocketChatError(response: Response) {
   try {
-    const payload = await response.json() as { error?: string; message?: string; reason?: string; details?: string };
-    const message = payload.error || payload.message || payload.reason || payload.details || 'Rocket.Chat trả về lỗi không rõ nguyên nhân.';
+    const payload = (await response.json()) as {
+      error?: string;
+      message?: string;
+      reason?: string;
+      details?: string;
+    };
+    const message =
+      payload.error ||
+      payload.message ||
+      payload.reason ||
+      payload.details ||
+      "Rocket.Chat trả về lỗi không rõ nguyên nhân.";
     return `${response.status} ${response.statusText}: ${message}`;
   } catch {
     return `${response.status} ${response.statusText}: Rocket.Chat trả về lỗi không xác định.`;
   }
 }
 
-export default function RocketChatConnection({ activeTab }: { activeTab: 'dashboard' | 'calendar' | 'settings' | 'notifications' }) {
-  const [config, setConfig] = useState<RocketChatNotificationConfig>(() => getStoredConfig());
-  const [connectionState, setConnectionState] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
+export default function RocketChatConnection({
+  activeTab,
+  onNotificationHistory,
+}: {
+  activeTab: "dashboard" | "calendar" | "settings" | "notifications" | "design";
+  onNotificationHistory?: (messages: RocketChatNotificationMessage[]) => void;
+}) {
+  const [config, setConfig] = useState<RocketChatNotificationConfig>(() =>
+    getStoredConfig(),
+  );
+  const [connectionState, setConnectionState] = useState<
+    "idle" | "connecting" | "connected" | "error"
+  >("idle");
   const [error, setError] = useState<string | null>(null);
-  const [subscription, setSubscription] = useState<RocketChatSubscription | null>(null);
-  const [notificationHistory, setNotificationHistory] = useState<RocketChatNotificationMessage[]>([]);
+  const [subscription, setSubscription] =
+    useState<RocketChatSubscription | null>(null);
+  const [notificationHistory, setNotificationHistory] = useState<
+    RocketChatNotificationMessage[]
+  >([]);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  useEffect(() => {
+    onNotificationHistory?.(notificationHistory);
+  }, [notificationHistory, onNotificationHistory]);
+
   const wsRef = useRef<WebSocket | null>(null);
-  const roomIdRef = useRef<string>('');
+  const roomIdRef = useRef<string>("");
   const reconnectTimerRef = useRef<number | null>(null);
   const pingTimerRef = useRef<number | null>(null);
   const isManualCloseRef = useRef(false);
@@ -104,26 +141,50 @@ export default function RocketChatConnection({ activeTab }: { activeTab: 'dashbo
 
     setIsSyncing(true);
     try {
-      const response = await fetch(`${normalizeServerUrl(serverUrl)}/api/v1/im.history?roomId=${encodeURIComponent(roomId)}&count=20`, {
-        headers: buildHeaders(config),
-      });
+      const response = await fetch(
+        `${normalizeServerUrl(serverUrl)}/api/v1/im.history?roomId=${encodeURIComponent(roomId)}&count=100`,
+        {
+          headers: buildHeaders(config),
+        },
+      );
 
       if (!response.ok) {
-        throw new Error(`Không thể load lịch sử khi kết nối Rocket.Chat: ${await readRocketChatError(response)}`);
+        throw new Error(
+          `Không thể load lịch sử khi kết nối Rocket.Chat: ${await readRocketChatError(response)}`,
+        );
       }
 
-      const payload = await response.json() as { messages?: Array<{ _id?: string; rid?: string; msg?: string; text?: string; ts?: string | { $date?: string }; u?: { username?: string } }> };
+      const payload = (await response.json()) as {
+        messages?: Array<{
+          _id?: string;
+          rid?: string;
+          msg?: string;
+          text?: string;
+          ts?: string | { $date?: string };
+          u?: { username?: string };
+        }>;
+      };
       const messages = (payload.messages ?? [])
-        .map((item) => normalizeRocketChatMessage({ fields: { rid: item.rid, args: [item] } }))
+        .map((item) =>
+          normalizeRocketChatMessage({
+            fields: { rid: item.rid, args: [item] },
+          }),
+        )
         .filter(Boolean) as RocketChatNotificationMessage[];
 
       setNotificationHistory((previous) => {
         const seen = new Set(previous.map((entry) => entry.id));
-        const next = [...messages.filter((entry) => !seen.has(entry.id)), ...previous].slice(0, 20);
+        const next = [
+          ...messages.filter((entry) => !seen.has(entry.id)),
+          ...previous,
+        ].slice(0, 100);
         return next;
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Không thể đồng bộ lịch sử ban đầu.';
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Không thể đồng bộ lịch sử ban đầu.";
       setError(message);
     } finally {
       setIsSyncing(false);
@@ -132,80 +193,110 @@ export default function RocketChatConnection({ activeTab }: { activeTab: 'dashbo
 
   const connect = async () => {
     if (!config.userId || !config.authToken) {
-      setError('Vui lòng nhập Rocket.Chat UserId và AuthToken.');
-      setConnectionState('error');
+      setError("Vui lòng nhập Rocket.Chat UserId và AuthToken.");
+      setConnectionState("error");
       return;
     }
 
-    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+    if (
+      wsRef.current &&
+      (wsRef.current.readyState === WebSocket.OPEN ||
+        wsRef.current.readyState === WebSocket.CONNECTING)
+    ) {
       return;
     }
 
     isManualCloseRef.current = false;
     const serverUrl = normalizeServerUrl(config.serverUrl);
     setError(null);
-    setConnectionState('connecting');
+    setConnectionState("connecting");
 
     try {
-      const subscriptionsResponse = await fetch(`${serverUrl}/api/v1/subscriptions.get`, {
-        headers: buildHeaders(config),
-      });
+      const subscriptionsResponse = await fetch(
+        `${serverUrl}/api/v1/subscriptions.get`,
+        {
+          headers: buildHeaders(config),
+        },
+      );
 
       if (!subscriptionsResponse.ok) {
-        throw new Error(`Không thể lấy danh sách subscription từ Rocket.Chat: ${await readRocketChatError(subscriptionsResponse)}`);
+        throw new Error(
+          `Không thể lấy danh sách subscription từ Rocket.Chat: ${await readRocketChatError(subscriptionsResponse)}`,
+        );
       }
 
       const subscriptionsPayload = await subscriptionsResponse.json();
-      const subscriptions = extractRocketChatSubscriptions(subscriptionsPayload);
-      const nextSubscription = findNotificationSubscription(subscriptions, config.roomName);
+      const subscriptions =
+        extractRocketChatSubscriptions(subscriptionsPayload);
+      const nextSubscription = findNotificationSubscription(
+        subscriptions,
+        config.roomName,
+      );
 
       if (!nextSubscription?.rid) {
-        throw new Error(`Không tìm thấy room "${config.roomName}" trong danh sách subscriptions.`);
+        throw new Error(
+          `Không tìm thấy room "${config.roomName}" trong danh sách subscriptions.`,
+        );
       }
 
       setSubscription(nextSubscription);
       roomIdRef.current = nextSubscription.rid;
       disconnectSocket();
 
-      const socket = new WebSocket(`${serverUrl.replace(/^http/, 'ws')}/websocket`);
+      const socket = new WebSocket(
+        `${serverUrl.replace(/^http/, "ws")}/websocket`,
+      );
       wsRef.current = socket;
 
       socket.onopen = () => {
-        socket.send(JSON.stringify({ msg: 'connect', version: '1', support: ['1', 'pre2', 'pre1'] }));
+        socket.send(
+          JSON.stringify({
+            msg: "connect",
+            version: "1",
+            support: ["1", "pre2", "pre1"],
+          }),
+        );
 
         const loginPayload = buildRocketChatLoginPayload(config.authToken);
         socket.send(JSON.stringify(loginPayload));
 
         if (nextSubscription.rid) {
-          socket.send(JSON.stringify(buildStreamRoomSubscription(nextSubscription.rid)));
+          socket.send(
+            JSON.stringify(buildStreamRoomSubscription(nextSubscription.rid)),
+          );
         }
 
         clearPingTimer();
         pingTimerRef.current = window.setInterval(() => {
           if (socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ msg: 'ping' }));
+            socket.send(JSON.stringify({ msg: "ping" }));
           }
         }, 30000);
 
-        setConnectionState('connecting');
+        setConnectionState("connecting");
       };
 
       socket.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data) as Record<string, unknown>;
 
-          if (payload.msg === 'result' && payload.id === 'rocket-chat-login') {
-            setConnectionState('connected');
+          if (payload.msg === "result" && payload.id === "rocket-chat-login") {
+            setConnectionState("connected");
             return;
           }
 
-          if (payload.collection === 'stream-room-messages') {
+          if (payload.collection === "stream-room-messages") {
             const message = normalizeRocketChatMessage(payload);
             if (!message || message.roomId !== nextSubscription.rid) {
               return;
             }
 
-            setNotificationHistory((previous) => [message, ...previous.filter((item) => item.id !== message.id)].slice(0, 20));
+            setNotificationHistory((previous) =>
+              [
+                message,
+                ...previous.filter((item) => item.id !== message.id),
+              ].slice(0, 100),
+            );
           }
         } catch {
           // Ignore malformed payloads from websocket; app should keep the socket alive.
@@ -213,8 +304,8 @@ export default function RocketChatConnection({ activeTab }: { activeTab: 'dashbo
       };
 
       socket.onerror = () => {
-        setConnectionState('error');
-        setError('WebSocket đang lỗi hoặc server không phản hồi.');
+        setConnectionState("error");
+        setError("WebSocket đang lỗi hoặc server không phản hồi.");
       };
 
       socket.onclose = () => {
@@ -225,58 +316,65 @@ export default function RocketChatConnection({ activeTab }: { activeTab: 'dashbo
         }
 
         if (!isManualCloseRef.current) {
-          setConnectionState('idle');
+          setConnectionState("idle");
           scheduleReconnect();
         }
       };
 
       await syncInitialHistory(nextSubscription.rid, serverUrl);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Không thể kết nối Rocket.Chat';
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Không thể kết nối Rocket.Chat";
       setError(message);
-      setConnectionState('error');
+      setConnectionState("error");
     }
   };
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
   }, [config]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
 
     const handleBeforeUnload = () => {
       disconnectSocket();
     };
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    window.addEventListener('pagehide', handleBeforeUnload);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("pagehide", handleBeforeUnload);
 
     return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.removeEventListener('pagehide', handleBeforeUnload);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("pagehide", handleBeforeUnload);
       disconnectSocket();
     };
   }, []);
 
   useEffect(() => {
-    if (activeTab !== 'notifications') return;
-
     if (!config.userId || !config.authToken) {
-      setError('Vui lòng nhập Rocket.Chat UserId và AuthToken.');
-      setConnectionState('error');
       return;
     }
 
     void connect();
-  }, [activeTab, config.userId, config.authToken, config.serverUrl, config.roomName]);
+  }, [
+    activeTab,
+    config.userId,
+    config.authToken,
+    config.serverUrl,
+    config.roomName,
+  ]);
 
   return (
-    <div className={activeTab === 'notifications' ? 'block' : 'hidden'}>
+    <div className={activeTab === "notifications" ? "block" : "hidden"}>
       <RocketChatNotifications
         config={config}
-        onConfigChange={(nextConfig) => setConfig((previous) => ({ ...previous, ...nextConfig }))}
+        onConfigChange={(nextConfig) =>
+          setConfig((previous) => ({ ...previous, ...nextConfig }))
+        }
         connectionState={connectionState}
         error={error}
         subscription={subscription}
@@ -285,7 +383,10 @@ export default function RocketChatConnection({ activeTab }: { activeTab: 'dashbo
         onConnect={() => void connect()}
         onSyncHistory={() => {
           if (subscription?.rid) {
-            void syncInitialHistory(subscription.rid, normalizeServerUrl(config.serverUrl));
+            void syncInitialHistory(
+              subscription.rid,
+              normalizeServerUrl(config.serverUrl),
+            );
           }
         }}
       />
