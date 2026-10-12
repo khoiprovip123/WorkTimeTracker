@@ -506,7 +506,7 @@ export default function App() {
       );
 
       if (!response.ok) {
-        throw new Error("Không thể lấy thông tin release từ GitHub.");
+        throw new Error(`Không thể lấy thông tin release từ GitHub (HTTP ${response.status}).`);
       }
 
       const data = (await response.json()) as {
