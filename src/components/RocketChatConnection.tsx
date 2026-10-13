@@ -71,10 +71,12 @@ async function readRocketChatError(response: Response) {
 
 export default function RocketChatConnection({
   activeTab,
-  onNotificationHistory,
+  onNotificationBatch,
+  storedAttendanceHistory,
 }: {
   activeTab: "dashboard" | "calendar" | "settings" | "notifications" | "design";
-  onNotificationHistory?: (messages: RocketChatNotificationMessage[]) => void;
+  onNotificationBatch?: (messages: RocketChatNotificationMessage[]) => Promise<void>;
+  storedAttendanceHistory?: RocketChatNotificationMessage[];
 }) {
   const [config, setConfig] = useState<RocketChatNotificationConfig>(() =>
     getStoredConfig(),
@@ -88,11 +90,6 @@ export default function RocketChatConnection({
   const [notificationHistory, setNotificationHistory] = useState<
     RocketChatNotificationMessage[]
   >([]);
-  const [isSyncing, setIsSyncing] = useState(false);
-
-  useEffect(() => {
-    onNotificationHistory?.(notificationHistory);
-  }, [notificationHistory, onNotificationHistory]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const roomIdRef = useRef<string>("");
@@ -134,61 +131,6 @@ export default function RocketChatConnection({
         void connect();
       }
     }, 4000);
-  };
-
-  const syncInitialHistory = async (roomId: string, serverUrl: string) => {
-    if (!roomId || !config.userId || !config.authToken) return;
-
-    setIsSyncing(true);
-    try {
-      const response = await fetch(
-        `${normalizeServerUrl(serverUrl)}/api/v1/im.history?roomId=${encodeURIComponent(roomId)}&count=100`,
-        {
-          headers: buildHeaders(config),
-        },
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          `Không thể load lịch sử khi kết nối Rocket.Chat: ${await readRocketChatError(response)}`,
-        );
-      }
-
-      const payload = (await response.json()) as {
-        messages?: Array<{
-          _id?: string;
-          rid?: string;
-          msg?: string;
-          text?: string;
-          ts?: string | { $date?: string };
-          u?: { username?: string };
-        }>;
-      };
-      const messages = (payload.messages ?? [])
-        .map((item) =>
-          normalizeRocketChatMessage({
-            fields: { rid: item.rid, args: [item] },
-          }),
-        )
-        .filter(Boolean) as RocketChatNotificationMessage[];
-
-      setNotificationHistory((previous) => {
-        const seen = new Set(previous.map((entry) => entry.id));
-        const next = [
-          ...messages.filter((entry) => !seen.has(entry.id)),
-          ...previous,
-        ].slice(0, 100);
-        return next;
-      });
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Không thể đồng bộ lịch sử ban đầu.";
-      setError(message);
-    } finally {
-      setIsSyncing(false);
-    }
   };
 
   const connect = async () => {
@@ -297,6 +239,11 @@ export default function RocketChatConnection({
                 ...previous.filter((item) => item.id !== message.id),
               ].slice(0, 100),
             );
+            if (onNotificationBatch) {
+              void onNotificationBatch([message]).catch((error) =>
+                setError(error instanceof Error ? error.message : "Không thể lưu chấm công TMT."),
+              );
+            }
           }
         } catch {
           // Ignore malformed payloads from websocket; app should keep the socket alive.
@@ -321,7 +268,6 @@ export default function RocketChatConnection({
         }
       };
 
-      await syncInitialHistory(nextSubscription.rid, serverUrl);
     } catch (error) {
       const message =
         error instanceof Error
@@ -378,17 +324,9 @@ export default function RocketChatConnection({
         connectionState={connectionState}
         error={error}
         subscription={subscription}
-        notificationHistory={notificationHistory}
-        isSyncing={isSyncing}
+        notificationHistory={notificationHistory.slice(0, 100)}
+        storedAttendanceHistory={storedAttendanceHistory ?? []}
         onConnect={() => void connect()}
-        onSyncHistory={() => {
-          if (subscription?.rid) {
-            void syncInitialHistory(
-              subscription.rid,
-              normalizeServerUrl(config.serverUrl),
-            );
-          }
-        }}
       />
     </div>
   );

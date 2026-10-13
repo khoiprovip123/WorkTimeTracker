@@ -17,9 +17,8 @@ type RocketChatNotificationsProps = {
   error: string | null;
   subscription: RocketChatSubscription | null;
   notificationHistory: RocketChatNotificationMessage[];
-  isSyncing: boolean;
+  storedAttendanceHistory: RocketChatNotificationMessage[];
   onConnect: () => void;
-  onSyncHistory: () => void;
 };
 
 export default function RocketChatNotifications({
@@ -29,9 +28,8 @@ export default function RocketChatNotifications({
   error,
   subscription,
   notificationHistory,
-  isSyncing,
+  storedAttendanceHistory,
   onConnect,
-  onSyncHistory,
 }: RocketChatNotificationsProps) {
   const handleInputChange = (
     field: keyof RocketChatNotificationConfig,
@@ -146,16 +144,6 @@ export default function RocketChatNotifications({
             </p>
           </div>
 
-          {subscription?.rid ? (
-            <button
-              className="button-secondary"
-              onClick={onSyncHistory}
-              type="button"
-              disabled={isSyncing}
-            >
-              {isSyncing ? "Đang sync..." : "Sync lại"}
-            </button>
-          ) : null}
         </div>
 
         <div className="space-y-3">
@@ -205,6 +193,23 @@ export default function RocketChatNotifications({
                   </span>
                 </div>
                 <p className="text-sm text-slate-100">{item.text}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="mt-5">
+        <h3 className="mb-3 text-sm uppercase tracking-[0.2em] text-slate-400">
+          Lịch sử chấm công đã lưu ({storedAttendanceHistory.length})
+        </h3>
+        {storedAttendanceHistory.length === 0 ? (
+          <p className="text-sm text-slate-400">Chưa có sự kiện chấm công hợp lệ được lưu.</p>
+        ) : (
+          <div className="max-h-80 space-y-2 overflow-y-auto">
+            {[...storedAttendanceHistory].reverse().map((item) => (
+              <div key={`${item.roomId}-${item.id}`} className="rounded-xl border border-slate-700 bg-slate-950/60 p-3 text-sm text-slate-200">
+                <p>{item.text}</p>
+                <p className="mt-1 text-xs text-slate-500">ID: {item.id} · Tin gửi: {new Date(item.createdAt).toLocaleString("vi-VN")}</p>
               </div>
             ))}
           </div>

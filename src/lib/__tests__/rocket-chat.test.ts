@@ -7,11 +7,25 @@ import {
 } from "../rocket-chat";
 
 describe("rocket-chat helpers", () => {
-  it("accepts attendance only when the message date matches its local timestamp", () => {
-    const sent = new Date(2026, 9, 12, 8, 37);
-    const message = { id: "1", roomId: "room", sender: "bot", createdAt: sent.toISOString(), text: "Bạn đã chấm công thành công vào ngày 12/10/2026" };
-    expect(attendanceNotificationTime(message)).toMatchObject({ date: "2026-10-12", time: "08:37" });
-    expect(attendanceNotificationTime({ ...message, text: "Bạn đã chấm công thành công vào ngày 11/10/2026" })).toBeNull();
+  it("requires a valid DD/MM/YYYY HH:mm:ss attendance notice", () => {
+    const message = { id: "1", roomId: "room", sender: "bot", createdAt: "invalid", text: "Bạn đã chấm công thành công vào ngày 12/10/2026 08:37:42 tại camera" };
+    expect(attendanceNotificationTime(message)).toMatchObject({ date: "2026-10-12", time: "08:37:42" });
+    for (const text of [
+      "Bạn đã chấm công thành công vào ngày 12/10/2026",
+      "Bạn đã chấm công thành công vào ngày 12/10/2026 08:37",
+      "Bạn đã chấm công thành công vào ngày 31/02/2026 08:37:42",
+      "Bạn đã chấm công thành công vào ngày 12/10/2026 25:00:00",
+      "Bạn đã chấm công thành công vào ngày 12/10/2026 08:37:60",
+      "Tin khác: Bạn đã chấm công thành công vào ngày 12/10/2026 08:37:42",
+    ]) expect(attendanceNotificationTime({ ...message, text })).toBeNull();
+  });
+  it("uses the attendance time in TMT text even when the notification arrives the next day", () => {
+    const message = {
+      id: "late", roomId: "room", sender: "bot",
+      createdAt: new Date(2026, 9, 13, 0, 10).toISOString(),
+      text: "Bạn đã chấm công thành công vào ngày 12/10/2026 18:08:55 tại camera cửa ngoài tầng 4",
+    };
+    expect(attendanceNotificationTime(message)).toMatchObject({ date: "2026-10-12", time: "18:08:55" });
   });
   it("finds the TMT Notification direct room by type and name", () => {
     const subscriptions = [

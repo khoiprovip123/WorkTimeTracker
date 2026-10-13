@@ -143,7 +143,7 @@ export default function DashboardTab({
             <div className="flex justify-between">
               <span>Check-out</span>
               <span>
-                {!currentLog?.checkOut ? "--" : hmOrDash(currentLog.checkOut)}
+                {!currentLog?.checkOut ? "--" : `${hmOrDash(currentLog.checkOut)}${currentLog.checkOutSource === "AUTO_NOTIFICATION" ? " (tạm)" : ""}`}
               </span>
             </div>
             <div className="flex justify-between">
@@ -287,7 +287,7 @@ export default function DashboardTab({
               </label>
             </div>
 
-            {!currentLog?.checkOut && (
+            {(!currentLog?.checkOut || currentLog.checkOutSource === "AUTO_NOTIFICATION") && (
               <button
                 className="button-primary w-full"
                 onClick={() => void onPrimaryAction()}
@@ -346,6 +346,7 @@ export default function DashboardTab({
                 <input
                   className="input mt-1"
                   type="time"
+                  step="1"
                   value={form.checkIn}
                   onChange={(e) =>
                     setForm((prev) => ({ ...prev, checkIn: e.target.value }))
@@ -357,6 +358,7 @@ export default function DashboardTab({
                 <input
                   className="input mt-1"
                   type="time"
+                  step="1"
                   value={form.checkOut}
                   onChange={(e) =>
                     setForm((prev) => ({ ...prev, checkOut: e.target.value }))
@@ -408,7 +410,7 @@ export default function DashboardTab({
                   <tr key={entry.id} className="border-t border-slate-800">
                     <td className="px-3 py-2">{formatViDate(entry.date)}</td>
                     <td className="px-3 py-2">{hmOrDash(entry.checkIn)}</td>
-                    <td className="px-3 py-2">{hmOrDash(entry.checkOut)}</td>
+                    <td className="px-3 py-2">{hmOrDash(entry.checkOut)}{entry.checkOutSource === "AUTO_NOTIFICATION" && " (tạm)"}</td>
                     <td className="px-3 py-2">
                       {formatMinutes(entry.workedMinutes)}
                     </td>
@@ -456,10 +458,10 @@ export default function DashboardTab({
             <h2 id="edit-work-log-title">Sửa chấm công · {formatViDate(edit.date)}</h2>
             <div className="mt-5 grid grid-cols-2 gap-3">
               <label>Check-in
-                <input className="workspace-field" type="time" value={edit.checkIn} onChange={(event) => setEdit({ ...edit, checkIn: event.target.value })} />
+                <input className="workspace-field" type="time" step="1" value={edit.checkIn} onChange={(event) => setEdit({ ...edit, checkIn: event.target.value })} />
               </label>
               <label>Check-out
-                <input className="workspace-field" type="time" value={edit.checkOut} onChange={(event) => setEdit({ ...edit, checkOut: event.target.value })} />
+                <input className="workspace-field" type="time" step="1" value={edit.checkOut} onChange={(event) => setEdit({ ...edit, checkOut: event.target.value })} />
               </label>
             </div>
             {editError && <p className="workspace-dialog-notice" role="alert">{editError}</p>}

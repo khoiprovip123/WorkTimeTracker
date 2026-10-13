@@ -32,7 +32,9 @@ export interface WorkLog {
   /** ISO yyyy-mm-dd */
   date: string;
   checkIn: string | null;
+  checkInSource?: "AUTO_NOTIFICATION" | "AUTO_START" | "MANUAL" | null;
   checkOut: string | null;
+  checkOutSource?: "AUTO_NOTIFICATION" | "MANUAL" | null;
   workedMinutes: number;
   /** Phút phải làm trong ngày, gồm cả nợ carry-over. NULL = dùng daily_required_minutes. */
   requiredMinutes: number | null;

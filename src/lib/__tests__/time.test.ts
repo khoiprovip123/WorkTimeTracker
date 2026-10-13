@@ -9,6 +9,7 @@ import {
   mondayOf,
   monthKey,
   normalizeHmInput,
+  nowHms,
   weekDates,
   workingDates,
 } from "../time";
@@ -22,13 +23,15 @@ describe("time utils", () => {
     expect(hmToMinutes("24:00")).toBeNull();
     expect(hmToMinutes("8:5")).toBeNull();
     expect(hmToMinutes(null)).toBeNull();
+    expect(nowHms(new Date(2026, 9, 12, 18, 8, 55))).toBe("18:08:55");
     expect(minutesToHm(810)).toBe("13:30");
     expect(minutesToHm(1500)).toBe("25:00"); // ca tràn sang ngày hôm sau
   });
 
   it("normalizes editable work hours and rejects invalid values", () => {
     expect(normalizeHmInput("8:30")).toBe("08:30");
-    expect(normalizeHmInput("08:30:00")).toBe("08:30");
+    expect(normalizeHmInput("08:30:00")).toBe("08:30:00");
+    expect(hmToMinutes("08:30:55")).toBe(510);
     expect(normalizeHmInput(" 17:05 ")).toBe("17:05");
     expect(normalizeHmInput("25:00")).toBeNull();
     expect(normalizeHmInput("08:75")).toBeNull();

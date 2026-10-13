@@ -14,17 +14,26 @@ export interface RocketChatNotificationMessage {
   sender: string;
 }
 
-/** Chỉ nhận thông báo chấm công có ngày trong nội dung khớp ngày gửi (giờ địa phương). */
+/** Chỉ nhận ngày giờ chấm công có đủ giây trong nội dung thông báo. */
 export function attendanceNotificationTime(message: RocketChatNotificationMessage): { date: string; time: string; timestamp: number } | null {
-  const match = /Bạn đã chấm công thành công vào ngày\s+(\d{2})\/(\d{2})\/(\d{4})(?!\d)/iu.exec(message.text);
+  const match = /^\s*Bạn đã chấm công thành công vào ngày\s+(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})(?=\s|$)/u.exec(message.text);
   if (!match) return null;
-  const timestamp = Date.parse(message.createdAt);
-  if (!Number.isFinite(timestamp)) return null;
-  const sent = new Date(timestamp);
   const date = `${match[3]}-${match[2]}-${match[1]}`;
-  const sentDate = `${sent.getFullYear()}-${String(sent.getMonth() + 1).padStart(2, "0")}-${String(sent.getDate()).padStart(2, "0")}`;
-  if (date !== sentDate) return null;
-  return { date, time: `${String(sent.getHours()).padStart(2, "0")}:${String(sent.getMinutes()).padStart(2, "0")}`, timestamp };
+  const year = Number(match[3]);
+  const month = Number(match[2]);
+  const day = Number(match[1]);
+  const validDate = new Date(year, month - 1, day);
+  if (validDate.getFullYear() !== year || validDate.getMonth() !== month - 1 || validDate.getDate() !== day) return null;
+
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  if (hour > 23 || minute > 59 || second > 59) return null;
+  return {
+    date,
+    time: `${match[4]}:${match[5]}:${match[6]}`,
+    timestamp: new Date(year, month - 1, day, hour, minute, second).getTime(),
+  };
 }
 
 export function extractRocketChatSubscriptions(

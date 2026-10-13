@@ -12,22 +12,30 @@ export function minutesToHm(mins: number): string {
 
 export function hmToMinutes(hm: string | null | undefined): number | null {
   if (!hm) return null;
-  const m = /^(\d{1,2}):(\d{2})$/.exec(hm.trim());
+  const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(hm.trim());
   if (!m) return null;
   const h = Number(m[1]);
   const mi = Number(m[2]);
-  if (h > 23 || mi > 59) return null;
+  if (h > 23 || mi > 59 || (m[3] !== undefined && Number(m[3]) > 59)) return null;
   return h * 60 + mi;
 }
 
-/** Chuẩn hóa giờ người dùng nhập về HH:mm để lưu và tính toán. */
+export function clockTimeSeconds(value: string): number | null {
+  const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(value);
+  if (!match) return null;
+  const [hour, minute, second] = [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)];
+  if (hour > 23 || minute > 59 || second > 59) return null;
+  return hour * 3600 + minute * 60 + second;
+}
+
+/** Chuẩn hóa giờ người dùng nhập, giữ nguyên giây nếu có. */
 export function normalizeHmInput(value: string): string | null {
-  const match = /^(\d{1,2}):(\d{2})(?::00)?$/.exec(value.trim());
+  const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(value.trim());
   if (!match) return null;
   const hours = Number(match[1]);
   const minutes = Number(match[2]);
-  if (hours > 23 || minutes > 59) return null;
-  return `${pad2(hours)}:${pad2(minutes)}`;
+  if (hours > 23 || minutes > 59 || (match[3] !== undefined && Number(match[3]) > 59)) return null;
+  return `${pad2(hours)}:${pad2(minutes)}${match[3] === undefined ? "" : `:${match[3]}`}`;
 }
 
 /** "08:00" -> "08:00", null -> "—" */
@@ -151,4 +159,8 @@ export function formatMonthVi(key: string): string {
 /** Giờ hiện tại dạng "HH:MM" */
 export function nowHm(d = new Date()): string {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+export function nowHms(d = new Date()): string {
+  return `${nowHm(d)}:${pad2(d.getSeconds())}`;
 }

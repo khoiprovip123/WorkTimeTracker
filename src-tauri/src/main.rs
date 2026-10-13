@@ -247,6 +247,16 @@ fn main() {
           description: "init".into(),
           sql: include_str!("../../migrations/001_init.sql").into(),
           kind: tauri_plugin_sql::MigrationKind::Up,
+        }, tauri_plugin_sql::Migration {
+          version: 2,
+          description: "checkout source".into(),
+          sql: include_str!("../../migrations/002_checkout_source.sql").into(),
+          kind: tauri_plugin_sql::MigrationKind::Up,
+        }, tauri_plugin_sql::Migration {
+          version: 3,
+          description: "attendance events".into(),
+          sql: include_str!("../../migrations/003_attendance_events.sql").into(),
+          kind: tauri_plugin_sql::MigrationKind::Up,
         }])
         .build(),
     )

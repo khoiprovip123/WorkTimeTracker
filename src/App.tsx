@@ -3,12 +3,14 @@ declare const __APP_VERSION__: string;
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CalendarTab from "./components/CalendarTab";
 import DashboardTab from "./components/DashboardTab";
 import DesignTab from "./components/DesignTab";
 import RocketChatConnection from "./components/RocketChatConnection";
 import { attendanceNotificationTime, type RocketChatNotificationMessage } from "./lib/rocket-chat";
+import { attendanceUpdateForDate } from "./lib/attendance-sync";
+import { getStoredAttendanceNotifications, getStoredAttendanceNotificationsForDate, saveAttendanceNotifications } from "./lib/db";
 import SettingsTab from "./components/SettingsTab";
 import {
   calculateLateMinutes,
@@ -23,10 +25,12 @@ import {
   hmToMinutes,
   minutesToHm,
   nowHm,
+  nowHms,
   todayIso,
 } from "./lib/time";
 
 const GITHUB_RELEASE_REPO = "khoiprovip123/WorkTimeTracker";
+const ATTENDANCE_LIVE_START_KEY = "ktt-attendance-live-start";
 type AppView = "dashboard" | "calendar" | "settings" | "notifications" | "design";
 const navigation: { id: AppView; label: string; icon: string }[] = [
   { id: "dashboard", label: "Dashboard", icon: "▦" },
@@ -116,6 +120,17 @@ function pickBestReleaseAsset(
 
 export default function App() {
   const [today, setToday] = useState(todayIso);
+  const [attendanceLiveStartedAt] = useState(() => {
+    const now = new Date().toISOString();
+    try {
+      const stored = window.localStorage.getItem(ATTENDANCE_LIVE_START_KEY);
+      if (stored && Number.isFinite(Date.parse(stored))) return stored;
+      window.localStorage.setItem(ATTENDANCE_LIVE_START_KEY, now);
+    } catch {
+      // Use this app session's start if local storage is unavailable.
+    }
+    return now;
+  });
   const {
     logs,
     leaves,
@@ -133,10 +148,43 @@ export default function App() {
     checkOut: "17:30",
   }));
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [notificationHistory, setNotificationHistory] = useState<RocketChatNotificationMessage[]>([]);
-  const syncingAttendance = useRef(false);
-  const autoStartedDates = useRef(new Set<string>());
-  const [attendanceSyncRevision, setAttendanceSyncRevision] = useState(0);
+  const [storedAttendanceHistory, setStoredAttendanceHistory] = useState<RocketChatNotificationMessage[]>([]);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const attendanceEventQueue = useRef<Promise<void>>(Promise.resolve());
+  const handleAttendanceBatch = useCallback((messages: RocketChatNotificationMessage[]) => {
+    const work = attendanceEventQueue.current.then(async () => {
+      const inserted = await saveAttendanceNotifications(messages);
+      if (inserted.length === 0) return;
+      const dates = [...new Set(inserted
+        .map(attendanceNotificationTime)
+        .filter((item): item is NonNullable<typeof item> => item !== null && item.date <= todayIso())
+        .map((item) => item.date))];
+      for (const date of dates) {
+        const storedForDate = await getStoredAttendanceNotificationsForDate(date, attendanceLiveStartedAt);
+        const existing = useAppStore.getState().logs.find((entry) => entry.date === date);
+        const update = attendanceUpdateForDate(storedForDate, date, existing);
+        if (!update?.checkIn) continue;
+        const { checkIn, checkOut } = update;
+        await saveLog({
+          date, ...update,
+          workedMinutes: checkOut ? (calculateWorkedMinutes(checkIn, checkOut, useAppStore.getState().settings) ?? 0) : 0,
+          requiredMinutes: existing?.requiredMinutes ?? null,
+          note: existing?.note ?? "",
+        });
+        const saved = useAppStore.getState().logs.find((entry) => entry.date === date);
+        if (date === todayIso() && saved && saved.checkOutSource !== "MANUAL" &&
+            (saved.checkInSource === "AUTO_NOTIFICATION" || saved.checkOutSource === "AUTO_NOTIFICATION")) {
+          setForm((previous) => ({ ...previous, date, checkIn: saved.checkIn ?? "", checkOut: saved.checkOut ?? "" }));
+          setStatusMessage(saved.checkOutSource === "AUTO_NOTIFICATION"
+            ? `⏱️ TMT tạm ghi nhận giờ về lúc ${saved.checkOut}.`
+            : `⏱️ TMT đã bắt đầu ca lúc ${saved.checkIn}.`);
+        }
+      }
+      setStoredAttendanceHistory(await getStoredAttendanceNotifications());
+    });
+    attendanceEventQueue.current = work.catch(() => undefined);
+    return work;
+  }, [saveLog, attendanceLiveStartedAt]);
   const [liveNow, setLiveNow] = useState(Date.now());
   const [view, setView] = useState<AppView>("dashboard");
   const [designDirty, setDesignDirty] = useState(false);
@@ -164,57 +212,18 @@ export default function App() {
   }, [load]);
 
   useEffect(() => {
+    if (!isLoading) setHasLoaded(true);
+  }, [isLoading]);
+
+  useEffect(() => {
     const intervalId = window.setInterval(() => setToday(todayIso()), 30_000);
     return () => window.clearInterval(intervalId);
   }, []);
 
   useEffect(() => {
-    if (isLoading || syncingAttendance.current || notificationHistory.length === 0) return;
-    const attendance = notificationHistory
-      .map(attendanceNotificationTime)
-      .filter((item): item is NonNullable<typeof item> => item !== null);
-    const openPrevious = logs
-      .filter((entry) => entry.date < today && entry.checkIn && !entry.checkOut)
-      .sort((a, b) => a.date.localeCompare(b.date));
-    const work = async () => {
-      let changed = false;
-      for (const entry of openPrevious) {
-        const latest = attendance
-          .filter((item) => item.date === entry.date && item.time > entry.checkIn!)
-          .sort((a, b) => b.timestamp - a.timestamp)[0];
-        if (!latest) continue;
-        await saveLog({
-          date: entry.date,
-          checkIn: entry.checkIn,
-          checkOut: latest.time,
-          workedMinutes: calculateWorkedMinutes(entry.checkIn!, latest.time, settings) ?? 0,
-          requiredMinutes: entry.requiredMinutes,
-          note: entry.note,
-        });
-        changed = true;
-      }
-      const todayLog = logs.find((entry) => entry.date === today);
-      if (!todayLog || (autoStartedDates.current.has(today) && !todayLog.checkOut)) {
-        const first = attendance
-          .filter((item) => item.date === today)
-          .sort((a, b) => a.timestamp - b.timestamp)[0];
-        if (first) {
-          await saveLog({ date: today, checkIn: first.time, checkOut: null, workedMinutes: 0, requiredMinutes: null });
-          autoStartedDates.current.delete(today);
-          changed = true;
-          setForm((previous) => ({ ...previous, date: today, checkIn: first.time, checkOut: "" }));
-          setStatusMessage(`⏱️ TMT đã bắt đầu ca lúc ${first.time}.`);
-        }
-      }
-      return changed;
-    };
-    syncingAttendance.current = true;
-    void work().then((changed) => {
-      if (changed) setAttendanceSyncRevision((value) => value + 1);
-    }).catch((error) => {
-      setStatusMessage(error instanceof Error ? error.message : "Không thể đồng bộ chấm công TMT.");
-    }).finally(() => { syncingAttendance.current = false; });
-  }, [isLoading, notificationHistory, logs, saveLog, settings, today, attendanceSyncRevision]);
+    if (isLoading) return;
+    void getStoredAttendanceNotifications().then(setStoredAttendanceHistory).catch(() => undefined);
+  }, [isLoading]);
 
   useEffect(() => {
     void getVersion()
@@ -225,7 +234,7 @@ export default function App() {
   useEffect(() => {
     if (
       !logs.some(
-        (entry) => entry.date === today && entry.checkIn && !entry.checkOut,
+        (entry) => entry.date === today && entry.checkIn && (!entry.checkOut || entry.checkOutSource === "AUTO_NOTIFICATION"),
       )
     ) {
       return;
@@ -241,7 +250,7 @@ export default function App() {
   );
   const currentLog = logs.find((entry) => entry.date === today);
   const activeSession =
-    currentLog && currentLog.checkIn && !currentLog.checkOut
+    currentLog && currentLog.checkIn && (!currentLog.checkOut || currentLog.checkOutSource === "AUTO_NOTIFICATION")
       ? currentLog
       : null;
 
@@ -255,10 +264,10 @@ export default function App() {
       return;
 
     const startedAt = nowHm() || "08:00";
-    autoStartedDates.current.add(today);
     void saveLog({
       date: today,
       checkIn: startedAt,
+      checkInSource: "AUTO_START",
       checkOut: null,
       workedMinutes: 0,
       requiredMinutes: null,
@@ -281,7 +290,7 @@ export default function App() {
 
   const elapsedSeconds = useMemo(() => {
     if (!activeSession?.checkIn) return 0;
-    const startedAt = Date.parse(`${today}T${activeSession.checkIn}:00`);
+    const startedAt = Date.parse(`${today}T${activeSession.checkIn}`);
     if (Number.isNaN(startedAt)) return 0;
 
     const breakStart = Date.parse(
@@ -407,7 +416,7 @@ export default function App() {
 
   const handleFinishWork = async () => {
     const checkIn = currentLog?.checkIn ?? (form.checkIn || "08:00");
-    const checkOut = nowHm() ?? "17:30";
+    const checkOut = nowHms();
     const minutes = calculateWorkedMinutes(checkIn, checkOut, settings) ?? 0;
 
     if (!checkIn) {
@@ -642,7 +651,7 @@ export default function App() {
           <span className="app-topbar-date">{formatViDate(today)}</span>
         </header>
         <div className={view === "design" ? "app-content app-content-workspace" : "app-content app-content-standard"}>
-        {view !== "design" && <RocketChatConnection activeTab={view} onNotificationHistory={setNotificationHistory} />}
+        {hasLoaded && view !== "design" && <RocketChatConnection activeTab={view} onNotificationBatch={handleAttendanceBatch} storedAttendanceHistory={storedAttendanceHistory} />}
 
         {view === "dashboard" && (
           <DashboardTab

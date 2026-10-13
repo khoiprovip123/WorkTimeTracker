@@ -53,15 +53,22 @@ describe("Lịch sử công", () => {
     await act(async () => editButton?.click());
     const dialog = container.querySelector('[role="dialog"]') as HTMLFormElement;
     expect(dialog).not.toBeNull();
-    const checkIn = dialog.querySelector('input[type="text"]') as HTMLInputElement;
+    const checkIn = dialog.querySelector('input[type="time"]') as HTMLInputElement;
     expect(checkIn.value).toBe("08:00");
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(checkIn, "8:30");
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(checkIn, "08:30");
       checkIn.dispatchEvent(new Event("input", { bubbles: true }));
       checkIn.dispatchEvent(new Event("change", { bubbles: true }));
     });
     await act(async () => dialog.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
     expect(onEditLog).toHaveBeenCalledWith("2026-10-06", "08:30", "17:00");
     expect(container.querySelector('[role="dialog"]')).toBeNull();
+
+    const provisional = { ...props.logs[0], date: props.today, checkOut: "17:30", checkOutSource: "AUTO_NOTIFICATION" as const };
+    await act(async () => root?.render(<DashboardTab {...props} currentLog={provisional} activeSession={provisional} />));
+    const finishButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "Kết thúc ca");
+    expect(finishButton).toBeDefined();
+    await act(async () => finishButton?.click());
+    expect(props.onPrimaryAction).toHaveBeenCalledOnce();
   });
 });

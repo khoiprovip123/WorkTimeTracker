@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   DEFAULT_SETTINGS,
   buildDayReport,
+  calculateWorkedMinutes,
   monthReport,
   weekReport,
 } from "./calculator";
@@ -14,8 +15,10 @@ import {
   saveSettings,
   upsertWorkLog,
 } from "./db";
-import { hmToMinutes, mondayOf, nowHm, todayIso } from "./time";
+import { clockTimeSeconds, hmToMinutes, mondayOf, nowHm, todayIso } from "./time";
 import type { CarryOver, LeaveRecord, Settings, WorkLog } from "./types";
+
+let logWriteQueue: Promise<void> = Promise.resolve();
 
 interface AppState {
   settings: Settings;
@@ -59,29 +62,44 @@ export const useAppStore = create<AppState>((set, get) => ({
     await saveSettings(settings);
     set({ settings });
   },
-  async saveLog(log) {
-    const current = get();
-    const checkIn = log.checkIn ?? null;
-    const checkOut = log.checkOut ?? null;
-    const workedMinutes = log.workedMinutes ?? (checkIn && checkOut ? 0 : 0);
-    const date = log.date;
+  saveLog(log) {
+    const write = logWriteQueue.then(async () => {
+      const current = get();
+      const existing = current.logs.find((item) => item.date === log.date);
+      if (log.checkInSource === "AUTO_START" && existing?.checkIn) return;
+      const automatic = log.checkInSource === "AUTO_NOTIFICATION" || log.checkOutSource === "AUTO_NOTIFICATION";
+      if (automatic && existing?.checkOut && existing.checkOutSource !== "AUTO_NOTIFICATION") return;
 
-    const existing = current.logs.find((item) => item.date === date);
-    const normalized: WorkLog = {
-      id: existing?.id ?? Date.now(),
-      date,
-      checkIn,
-      checkOut,
-      workedMinutes,
-      requiredMinutes: log.requiredMinutes ?? existing?.requiredMinutes ?? null,
-      note: log.note ?? existing?.note ?? "",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+      const keepManualStart = automatic && existing?.checkInSource === "MANUAL" && !!existing.checkIn;
+      const checkIn = keepManualStart ? existing.checkIn : log.checkIn ?? null;
+      let checkOut = log.checkOut ?? null;
+      if (automatic && existing?.checkOutSource === "AUTO_NOTIFICATION" && existing.checkOut &&
+          (!checkOut || (clockTimeSeconds(existing.checkOut) ?? -1) > (clockTimeSeconds(checkOut) ?? -1))) checkOut = existing.checkOut;
+      if (automatic && checkIn && checkOut &&
+          (clockTimeSeconds(checkOut) ?? -1) <= (clockTimeSeconds(checkIn) ?? Infinity)) checkOut = null;
+      const workedMinutes = automatic
+        ? checkIn && checkOut ? (calculateWorkedMinutes(checkIn, checkOut, current.settings) ?? 0) : 0
+        : log.workedMinutes ?? 0;
 
-    await upsertWorkLog(normalized);
-    const next = await getWorkLogs();
-    set({ logs: next });
+      const normalized: WorkLog = {
+        id: existing?.id ?? Date.now(),
+        date: log.date,
+        checkIn,
+        checkInSource: checkIn ? (keepManualStart ? "MANUAL" : log.checkInSource ?? "MANUAL") : null,
+        checkOut,
+        checkOutSource: checkOut ? (automatic ? "AUTO_NOTIFICATION" : log.checkOutSource ?? "MANUAL") : null,
+        workedMinutes,
+        requiredMinutes: log.requiredMinutes ?? existing?.requiredMinutes ?? null,
+        note: log.note ?? existing?.note ?? "",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await upsertWorkLog(normalized);
+      set({ logs: await getWorkLogs() });
+    });
+    logWriteQueue = write.catch(() => undefined);
+    return write;
   },
   async deleteLog(date: string) {
     await deleteWorkLog(date);

@@ -1,5 +1,6 @@
 import Database from "@tauri-apps/plugin-sql";
 import type { CarryOver, LeaveRecord, Settings, WorkLog } from "./types";
+import { attendanceNotificationTime, type RocketChatNotificationMessage } from "./rocket-chat";
 
 const LEGACY_STORAGE_KEY = "worktime-tracker.sqlite";
 const DEFAULT_SETTINGS: Settings = {
@@ -54,10 +55,11 @@ async function importLegacyData(db: Database) {
     const placeholders = result?.columns
       .map((_column, i) => `$${i + 1}`)
       .join(",");
+    const columns = result?.columns.map((column) => `"${column.replace(/"/g, '""')}"`).join(", ");
     for (const values of result?.values ?? []) {
       await db
         .execute(
-          `INSERT OR IGNORE INTO ${table} VALUES (${placeholders})`,
+          `INSERT OR IGNORE INTO ${table} (${columns}) VALUES (${placeholders})`,
           values,
         )
         .catch(() => undefined);
@@ -80,6 +82,48 @@ async function seedDefaults(db: Database) {
 export async function getDatabase() {
   dbPromise ??= createDatabase();
   return dbPromise;
+}
+
+/** Lưu sự kiện hợp lệ một lần theo ID tin nhắn hoặc cùng ngày giờ chấm công. */
+export async function saveAttendanceNotifications(messages: RocketChatNotificationMessage[]): Promise<RocketChatNotificationMessage[]> {
+  const db = await getDatabase();
+  const receivedAt = new Date().toISOString();
+  const inserted: RocketChatNotificationMessage[] = [];
+  for (const message of messages) {
+    const event = attendanceNotificationTime(message);
+    if (!event) continue;
+    const result = await db.execute(
+      `INSERT OR IGNORE INTO attendance_events
+       (room_id, message_id, work_date, event_time, message_text, sent_at, received_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [message.roomId, message.id, event.date, event.time, message.text, message.createdAt, receivedAt],
+    );
+    if (result.rowsAffected > 0) inserted.push(message);
+  }
+  return inserted;
+}
+
+export async function getStoredAttendanceNotifications(): Promise<RocketChatNotificationMessage[]> {
+  const db = await getDatabase();
+  const rows = await db.select<Array<{ room_id: string; message_id: string; message_text: string; sent_at: string }>>(
+    "SELECT room_id, message_id, message_text, sent_at FROM attendance_events ORDER BY work_date, event_time",
+  );
+  return rows.map((row) => ({
+    id: row.message_id, roomId: row.room_id, text: row.message_text,
+    createdAt: row.sent_at, sender: "TMT",
+  }));
+}
+
+export async function getStoredAttendanceNotificationsForDate(date: string, receivedSince: string): Promise<RocketChatNotificationMessage[]> {
+  const db = await getDatabase();
+  const rows = await db.select<Array<{ room_id: string; message_id: string; message_text: string; sent_at: string }>>(
+    "SELECT room_id, message_id, message_text, sent_at FROM attendance_events WHERE work_date = $1 AND received_at >= $2 ORDER BY event_time",
+    [date, receivedSince],
+  );
+  return rows.map((row) => ({
+    id: row.message_id, roomId: row.room_id, text: row.message_text,
+    createdAt: row.sent_at, sender: "TMT",
+  }));
 }
 
 export async function getSettings(): Promise<Settings> {
@@ -145,7 +189,9 @@ export async function getWorkLogs(): Promise<WorkLog[]> {
     id: Number(r.id),
     date: r.date as string,
     checkIn: (r.check_in as string) ?? null,
+    checkInSource: (r.check_in_source as WorkLog["checkInSource"]) ?? null,
     checkOut: (r.check_out as string) ?? null,
+    checkOutSource: (r.check_out_source as WorkLog["checkOutSource"]) ?? null,
     workedMinutes: Number(r.worked_minutes),
     requiredMinutes: (r.required_minutes as number) ?? null,
     note: r.note as string,
@@ -163,9 +209,9 @@ export async function upsertWorkLog(
   const db = await getDatabase();
   const now = new Date().toISOString();
   await db.execute(
-    `INSERT INTO work_logs (date, check_in, check_out, worked_minutes, required_minutes, note, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
-     ON CONFLICT(date) DO UPDATE SET check_in = $2, check_out = $3, worked_minutes = $4, required_minutes = $5, note = $6, updated_at = $7`,
+    `INSERT INTO work_logs (date, check_in, check_out, worked_minutes, required_minutes, note, created_at, updated_at, check_out_source, check_in_source)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9)
+     ON CONFLICT(date) DO UPDATE SET check_in = $2, check_out = $3, worked_minutes = $4, required_minutes = $5, note = $6, updated_at = $7, check_out_source = $8, check_in_source = $9`,
     [
       log.date,
       log.checkIn,
@@ -174,6 +220,8 @@ export async function upsertWorkLog(
       log.requiredMinutes,
       log.note,
       now,
+      log.checkOutSource ?? null,
+      log.checkInSource ?? null,
     ],
   );
 }
